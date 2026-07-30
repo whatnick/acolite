@@ -1,414 +1,302 @@
-# ACOLITE-RS Roadmap
+# ACOLITE-RS Roadmap — Updated 2026-07-30
 
-## Architecture
+## Executive Summary
+
+### Current State (as of 2026-07-30)
+- **Rust LOC**: 13,014 across 64 `.rs` files
+- **Python LOC** (target): 55,342 across 528 `.py` files
+- **Ported**: 4 sensor loaders (Landsat 8/9, Sentinel-2, Sentinel-3 OLCI, PACE OCI) + full LUT-DSF atmospheric correction pipeline
+- **Coverage**: ~9,758 Python LOC equivalently ported (~18% of codebase by functionality)
+- **Tests**: 135 Rust + 195 Python regression = **330 total tests**
+- **Elapsed time**: ~12 active days (2026-03-05 to 2026-03-17), agent-assisted with Kiro + Copilot dual-agent harness
+
+### New Python Work Since Port Started (2026-03-05 → 2026-07-29)
+
+95 commits upstream adding **22,734 net new lines** including:
+
+| New Module | LOC | Category | Port Priority |
+|-----------|-----|----------|---------------|
+| `hdsf/hdsf.py` | 336 | Hyperspectral DSF variant | High (core AC) |
+| `rtm/hydrolight/` | 683 | Radiative transfer modelling | Medium (L2W) |
+| `tact/profiles/era5_ecmwf.py` | 190 | ERA5 atmospheric profiles | Medium (TACT) |
+| `convert/c2rcc.py` + `polymer.py` | 266 | External AC format import | Low |
+| `parameters/chl_crat/` | 160 | Chl-a colour ratio algorithm | Medium (L2W) |
+| `parameters/malh/` | 37 | MALH algorithm | Medium (L2W) |
+| `shared/wopp/` | 65 | Water optical property params | Medium (L2W) |
+| `shared/array/` | ~120 | Array utilities (convolve, normalise) | Low (utility) |
+| `shared/xr/read_rho.py` | 52 | xarray reader | Low |
+| `map/rgb/` | 44 | RGB mapping | Low (visualization) |
+| `pace/convert_gains.py` | 32 | PACE gain conversion | Low |
+
+**Impact on port scope**: +1,985 LOC of algorithmically significant code (hDSF, Hydrolight, ERA5, chl_crat) that will need Rust equivalents.
+
+---
+
+## Revised Total Scope Assessment
+
+### Python LOC by Port Category
+
+| Category | Python LOC | Rust Status | Complexity |
+|----------|-----------|-------------|------------|
+| **Already ported (4 sensors + DSF AC)** | 9,758 | ✅ 13,014 Rust LOC | Done |
+| **Remaining sensor loaders (36 sensors)** | 13,508 | Not started | Medium (repetitive) |
+| **Core orchestration** (`acolite/acolite/`) | 7,890 | Partial (pipeline.rs) | High |
+| **Shared utilities** (`shared/`) | 4,780 | Partial (~30%) | Medium |
+| **Adjacency correction** (RAdCor + GLAD) | 2,915 | Not started | Very High (physics) |
+| **GEE integration** | 2,694 | Not started | Medium (may skip) |
+| **TACT** (thermal correction) | 2,053 | Not started | High (libRadtran) |
+| **API/download** | 1,808 | Partial (CMR/STAC) | Medium |
+| **AerLUT** | 1,568 | ✅ Done | — |
+| **AC core** | 1,987 | ✅ Done | — |
+| **Output/writer** | 1,333 | Partial (COG/GeoZarr) | Medium |
+| **RTM** (Hydrolight + libRadtran) | 1,037 | Not started | High |
+| **DEM** | 988 | Not started | Medium |
+| **GEM** (generic extract/merge) | 954 | Not started | Medium |
+| **Parameters** (L2W products) | 916 | Not started | Medium |
+| **Masking** | 592 | Not started | Low |
+| **Glint** | 384 | ✅ Done (glint.rs) | — |
+| **hDSF** | 337 | Not started | High (new) |
+| **Other** (zarr, map, convert, custom) | ~700 | Partial | Low |
+
+**Total remaining**: ~41,400 Python LOC to port (including new upstream additions)
+
+---
+
+## Time Estimation — Agent-Assisted Port
+
+### Methodology
+Based on observed velocity from Phase A–C (the 12-day sprint):
+- **Ported**: ~9,758 Python LOC → 13,014 Rust LOC
+- **Produced**: 330 regression tests
+- **Effective rate**: ~815 Python LOC ported per active day (including tests + validation)
+- **Rust expansion factor**: ~1.33× (Rust is more verbose + explicit error handling + tests)
+
+### Complexity Multipliers
+
+| Complexity | Multiplier | Reasoning |
+|-----------|-----------|-----------|
+| Repetitive sensor loaders | 0.6× | Template-based, agent excels at these |
+| Standard utilities | 0.8× | Straightforward NumPy → ndarray |
+| Core orchestration | 1.5× | State management, settings, multi-path dispatch |
+| Physics algorithms (RAdCor, TACT, hDSF) | 2.0× | Numerical precision critical, external deps |
+| External system integration (GEE, libRadtran) | 2.5× | May need FFI or redesign |
+
+### Phase-by-Phase Estimate
+
+| Phase | Scope (Python LOC) | Complexity | Agent-Days | Calendar Weeks |
+|-------|-------------------|-----------|-----------|----------------|
+| **D: Additional Sensor Loaders** | 13,508 | 0.6× | 10 | 2–3 |
+| **E: Production Hardening** | ~3,000 | 1.0× | 4 | 1 |
+| **F: L2W Water Products** | 916 + 337 (hDSF) | 1.5× | 3 | 1 |
+| **G: Core Orchestration** | 7,890 | 1.5× | 15 | 3–4 |
+| **H: Shared Utilities** | ~3,300 (remaining) | 0.8× | 4 | 1 |
+| **I: Adjacency Correction** | 2,915 | 2.0× | 7 | 2 |
+| **J: TACT + RTM** | 3,090 | 2.0× | 8 | 2 |
+| **K: DEM + Masking + GEM** | 2,534 | 1.0× | 3 | 1 |
+| **L: API/Download + Output** | 2,141 (remaining) | 0.8× | 3 | 1 |
+| **M: GEE** (optional) | 2,694 | 2.5× | 8 | 2 |
+| **N: Integration + CI + Docs** | — | 1.0× | 5 | 1–2 |
+| **Total** | **~41,400** | | **70 agent-days** | **17–22 weeks** |
+
+### Without GEE (recommended — GEE is a cloud service, better wrapped than ported)
+
+| | Agent-Days | Calendar Weeks |
+|---|-----------|----------------|
+| **Total (excluding GEE)** | **62 agent-days** | **15–20 weeks** |
+
+### Summary Estimate
+
+| Metric | Value |
+|--------|-------|
+| **Already done** | 12 active agent-days (Phase A–C) |
+| **Remaining (excl. GEE)** | ~62 agent-days |
+| **Total project** | **~74 agent-days** |
+| **Calendar time** (1 dev, 4 days/week effective) | **18–20 weeks** |
+| **Calendar time** (2 agents in parallel) | **10–12 weeks** |
+| **Expected final Rust LOC** | ~55,000–60,000 |
+| **Expected final test count** | ~800–1,000 |
+
+---
+
+## Updated Phase Plan
+
+### Phase D — Remaining Sensor Loaders (36 sensors)
+**Estimate: 10 agent-days**
+
+Batch by I/O pattern (agent can template these):
+
+| Batch | Sensors | Pattern | Days |
+|-------|---------|---------|------|
+| D1: GeoTIFF-based | WorldView, Pléiades, Planet, IKONOS, Deimos, Formosat, GF, Huanjing, OpenCosmos, SDGSAT, AMAZONIA | GDAL GeoTIFF + XML metadata | 3 |
+| D2: HDF5-based | PRISMA, DESIS, EnMAP, EMIT, HICO, CHRIS, HYPERION, HyperField, HYPSO, Tanager | HDF5 reader, wavelength tables | 3 |
+| D3: NetCDF-based | VIIRS, GOCI, SeaHawk, EarthCare, SeaDAS | NetCDF + orbit geometry | 2 |
+| D4: Geostationary | GOES, Himawari, SEVIRI, FCI | Full-disk subsetting, segment stitching | 2 |
+
+### Phase E — Production Hardening
+**Estimate: 4 agent-days**
+
+- [ ] NetCDF L2R output (matching Python format) — **blocks Phase F**
+- [ ] Ancillary spatial+temporal interpolation (MERRA2 bilinear)
+- [ ] DEM-derived pressure (barometric formula from SRTM/Copernicus DEM)
+- [ ] Streaming processing for large scenes (tiled I/O)
+- [ ] CLI matching Python ACOLITE settings file format
+- [ ] Settings TOML → ProcessingConfig mapping
+
+### Phase F — L2W Water Products + hDSF
+**Estimate: 3 agent-days**
+
+- [ ] Port `acolite_l2w.py` parameter dispatch
+- [ ] Chlorophyll-a (OC algorithms: OC3, OC4, OC5, OC6)
+- [ ] Chlorophyll-a colour-ratio (`chl_crat`)
+- [ ] TSS (Nechad 2010, Dogliotti 2015)
+- [ ] Turbidity (Dogliotti, Nechad)
+- [ ] QAA (quasi-analytical algorithm)
+- [ ] MALH
+- [ ] hDSF (hyperspectral DSF variant — new 336 LOC)
+- [ ] Regression: derived products Rust vs Python
+
+### Phase G — Core Orchestration
+**Estimate: 15 agent-days** (most complex phase)
+
+- [ ] `acolite_run.py` → multi-scene pipeline orchestrator
+- [ ] `acolite_l1r.py` → L1 reader dispatch (identify sensor → call loader)
+- [ ] `acolite_l2r.py` → L2R processing (2,244 LOC — largest single file)
+- [ ] `identify_bundle.py` → input detection heuristics
+- [ ] `acolite_map.py` → mapping/visualization output
+- [ ] `acolite_flags.py` → quality flags
+- [ ] `acolite_pans.py` → pansharpening
+- [ ] `parameter_scaling.py` / `parameter_discretisation.py`
+- [ ] Settings system (TOML-based, sensor defaults, user overrides)
+- [ ] Logging framework
+
+### Phase H — Shared Utilities (remaining)
+**Estimate: 4 agent-days**
+
+- [ ] Projection handling (setup, merge, sub, warp)
+- [ ] NetCDF read/write/extract utilities
+- [ ] Polygon/ROI/limit processing
+- [ ] RSR convolution (rsr_dict, rsr_convolute)
+- [ ] Sun position / geometry calculations
+- [ ] WOPP (water optical properties)
+- [ ] Authentication (EarthData .netrc)
+- [ ] SFTP upload
+- [ ] Array utilities (remaining: convolve, derivative)
+
+### Phase I — Adjacency Correction
+**Estimate: 7 agent-days** (physics-heavy)
+
+- [ ] RAdCor algorithm (1,979 LOC — physics-based adjacency)
+- [ ] GLAD algorithm (482 LOC)
+- [ ] PSF modelling
+- [ ] Validation against Python outputs
+
+### Phase J — TACT + RTM
+**Estimate: 8 agent-days** (external dependency complexity)
+
+- [ ] libRadtran integration (FFI or process spawning)
+- [ ] TACT thermal correction pipeline
+- [ ] ERA5/ECMWF profile download and parsing
+- [ ] Emissivity estimation (NDVI-based)
+- [ ] Hydrolight RTM interface
+- [ ] TACT simulation LUT generation
+
+### Phase K — DEM + Masking + GEM
+**Estimate: 3 agent-days**
+
+- [ ] Copernicus DEM download + tile stitching
+- [ ] SRTM DEM support
+- [ ] DEM shadow masking
+- [ ] Land/water mask (OCM)
+- [ ] Hillshade
+- [ ] GEM (scene download, extract, merge)
+
+### Phase L — API/Download + Output (remaining)
+**Estimate: 3 agent-days**
+
+- [ ] EarthExplorer API
+- [ ] CDSE (Copernicus Data Space) API
+- [ ] GOCI download
+- [ ] GeoTIFF output (nc_to_geotiff)
+- [ ] NetCDF compression
+- [ ] Reprojection/cropping utilities
+
+### Phase M — GEE Integration (optional)
+**Estimate: 8 agent-days** (recommended: wrap Python or skip)
+
+- [ ] Google Earth Engine interface
+- [ ] AGH (ACOLITE GEE Hybrid) — 1,229 LOC
+- [ ] Scene finding via GEE
+
+### Phase N — Integration, CI, Documentation
+**Estimate: 5 agent-days**
+
+- [ ] Full end-to-end pipeline integration tests
+- [ ] CI/CD pipeline (GitHub Actions)
+- [ ] Performance regression CI (fail on >10% throughput drop)
+- [ ] Binary releases (cross-compilation)
+- [ ] User documentation + migration guide
+- [ ] PyO3 Python bindings (optional — drop-in replacement)
+
+---
+
+## Risk Assessment
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Upstream Python keeps diverging | Medium | Merge regularly (already done 2026-07-30); track diff weekly |
+| Numerical precision in RAdCor/TACT | High | Early validation against Python reference scenes |
+| libRadtran FFI complexity | Medium | Use process spawning (like Python does) not native FFI |
+| GDAL dependency for all sensors | Low | Already feature-gated; tiff-crate fallback for simple formats |
+| GEE integration infeasible in Rust | Low | Keep as Python wrapper or skip entirely |
+| hDSF is still experimental upstream | Low | Port after API stabilises; only 336 LOC |
+
+---
+
+## Architecture (unchanged)
 
 ```
 src/
 ├── auth/           # Secure credentials (.netrc, env vars, config)
-│   └── credentials.rs
-├── loader/         # INPUT: Read satellite data
-│   ├── geotiff.rs  # GDAL/tiff GeoTIFF reader (GDAL optional)
-│   ├── landsat.rs  # Landsat L1 scene loader + MTL integration
-│   ├── sentinel2.rs # S2 SAFE JP2 loader + radiometric calibration
-│   ├── pace.rs     # PACE OCI L1B NetCDF reader
-│   └── source/     # Remote data access
-│       ├── cmr.rs      # NASA CMR search (OBDAAC + LP DAAC)
-│       ├── stac.rs     # STAC search
-│       └── download.rs # Download (EarthData + AWS S3)
-├── ac/             # PROCESSING: Atmospheric correction
-│   ├── ancillary.rs # OBPG ancillary download (ozone, met, pressure, wind)
-│   ├── aerlut.rs   # Aerosol LUT reader (sensor-specific 6SV NetCDF)
-│   ├── dsf.rs      # DSF: dark spectrum, AOT inversion, model selection, correction
-│   ├── gas_lut.rs  # Gas transmittance (O₃, H₂O, CO₂, O₂ from LUTs + RSR)
-│   ├── glint.rs    # Sun glint correction (Cox-Munk + Fresnel)
-│   ├── interp.rs   # N-dimensional regular grid interpolator
-│   ├── calibration.rs, rayleigh.rs, gas.rs, lut.rs
-├── writer/         # OUTPUT: Write results
-│   ├── mod.rs      # Auto-dispatch: >50 bands → GeoZarr, ≤50 → COG
-│   ├── cog.rs      # Cloud-Optimized GeoTIFF (multispectral/superspectral)
-│   └── geozarr.rs  # GeoZarr V3 (hyperspectral)
+├── loader/         # INPUT: Read satellite data (4 sensors done, 36 remaining)
+├── ac/             # PROCESSING: Atmospheric correction (DSF done)
+├── writer/         # OUTPUT: Write results (COG + GeoZarr done)
 ├── core/           # Data types (band, metadata, projection)
-├── sensors/        # Sensor definitions (landsat, sentinel2, sentinel3, pace)
+├── sensors/        # Sensor definitions
 └── (pipeline, parallel, resample, simd)
+
+Future additions:
+├── l2w/            # Water product algorithms (Phase F)
+├── adjacency/      # RAdCor + GLAD (Phase I)
+├── thermal/        # TACT (Phase J)
+├── dem/            # DEM handling (Phase K)
+└── masking/        # Land/water/cloud masking (Phase K)
 ```
 
-## Output Format Strategy
-
-`write_auto()` selects format based on band count:
-
-| Category | Bands | Format | Rationale |
-|----------|-------|--------|-----------|
-| Hyperspectral | >50 | GeoZarr | 3D chunked array, efficient for 100s of bands |
-| Superspectral | 16–50 | per-band COG | Widely compatible, manageable file count |
-| Multispectral | ≤15 | per-band COG | Standard GIS workflow |
-
-## Sensor Audit — Band Count Classification
-
-### Hyperspectral (>50 bands) → GeoZarr
-
-| Sensor | Bands | Status |
-|--------|-------|--------|
-| Tanager | 420 | Not started |
-| PACE OCI | 286 | ✅ Full DSF pipeline + LUT gas transmittance + full-scene validated |
-| EMIT | 285 | Not started |
-| HYPERION | 242 | Not started |
-| PRISMA | 239 | Not started |
-| DESIS | 235 | Not started |
-| EnMAP | 224 | Not started |
-| HyperField | 150 | Not started |
-| HICO | 128 | Not started |
-| HYPSO | 120 | Not started |
-| CHRIS | 62 | Not started |
-
-### Superspectral (16–50 bands) → per-band COG
-
-| Sensor | Bands | Status |
-|--------|-------|--------|
-| Aqua/Terra MODIS | 36 | Not started |
-| WorldView-3 | 29 | Not started |
-| VIIRS (NPP/J1/J2) | 22 | Not started |
-| Sentinel-3 OLCI | 21 | ✅ Full DSF pipeline + smile correction + limit subsetting |
-| AMAZONIA-1 WFI | 18 | Not started |
-| GOES ABI | 16 | Not started |
-| Himawari AHI | 16 | Not started |
-| MTG-I FCI | 16 | Not started |
-
-### Multispectral (≤15 bands) → per-band COG
-
-| Sensor | Bands | Status |
-|--------|-------|--------|
-| ENVISAT MERIS | 15 | Not started |
-| Sentinel-2 MSI | 13 | ✅ Full LUT-DSF pipeline |
-| GOCI-2 | 12 | Not started |
-| SEVIRI | 12 | Not started |
-| Sentinel-3 SLSTR | 11 | Not started |
-| Landsat 8/9 OLI | 9 | ✅ Full LUT-DSF pipeline |
-| Landsat 7 ETM+ | 8 | Not started |
-| PlanetScope SD8 | 8 | Not started |
-| Landsat 5 TM | 7 | Not started |
-| WorldView-2 | 6–8 | Not started |
-| Pléiades | 5–7 | Not started |
-| QuickBird-2 | 5 | Not started |
-
-### Priority for Rust Port
-
-1. **Landsat 8/9** — ✅ Full LUT-DSF pipeline, validated
-2. **Sentinel-2 MSI** — ✅ Full LUT-DSF pipeline, physics-equivalent (RMSE < 0.002)
-3. **PACE OCI** — ✅ Full generic-LUT DSF pipeline with LUT-based gas transmittance
-4. **Sentinel-3 OLCI** — ✅ Full generic-LUT DSF pipeline, smile correction, limit subsetting
-5. **PRISMA/DESIS/EnMAP** — Share HDF5 loader pattern
-6. **EMIT** — NetCDF, similar to PACE
-
-## Subset / Limit Processing
-
-All four implemented sensors support geographic limit subsetting via `[south, west, north, east]`:
-
-| Sensor | Method | Loader function |
-|--------|--------|-----------------|
-| PACE OCI | `find_subset()` scans lat/lon → pixel bbox → bulk-read subset from NetCDF | `load_pace_l1b(path, limit)` |
-| Sentinel-3 OLCI | `compute_subset()` on interpolated TPGs → subset radiance, TPGs, detector_index | `load_olci_scene(dir, limit)` |
-| Sentinel-2 | Geographic CRS → pixel coords via geotransform inverse | `load_sentinel2_scene_limit(dir, res, limit)` |
-| Landsat | Geographic CRS → pixel coords via geotransform inverse | `load_landsat_scene_limit(dir, limit)` |
-
-All four sensors use `latlon_limit_to_pixel_subset()` in `src/loader/mod.rs` which handles
-both geographic CRS (pixel_width < 1.0°) and UTM-projected CRS via a pure-Rust Karney
-series WGS-84 UTM approximation (accurate to ~1 mm, no PROJ dependency). UTM zone is
-inferred from the WKT projection string (parses "zone N" or EPSG 326xx/327xx).
-
-## Regression Testing
-
-Full regression strategy is documented in [REGRESSION_TESTING_ROADMAP.md](REGRESSION_TESTING_ROADMAP.md).
-
-### Rust Tests
-
-| Suite | Tests | Command |
-|-------|-------|---------|
-| Unit tests | 34 | `cargo test --lib` |
-| Integration tests | 8 | `cargo test --test integration_tests` |
-| Landsat E2E | 15 | `cargo test --test landsat_e2e` |
-| PACE E2E | 5 | `cargo test --test pace_e2e` |
-| Sentinel-2 E2E | 18 | `cargo test --test sentinel2_e2e` |
-| Sentinel-3 E2E | 27 | `cargo test --test sentinel3_e2e` |
-| Sentinel-3 proptest | 12 | `cargo test --test sentinel3_proptest` |
-| All-sensors proptest | 19 | `cargo test --test all_sensors_proptest` |
-
-The all-sensors proptest suite includes 4 subset-specific property tests:
-
-| Property test | What it verifies |
-|---------------|-----------------|
-| `prop_geographic_subset_within_image` | Pixel bounds stay inside image for geographic CRS |
-| `prop_full_image_limit_returns_full` | Full-image limit returns ≈ full image (within 2px) |
-| `prop_disjoint_limit_returns_none` | Limit outside image returns `None` |
-| `prop_utm_subset_sa_region` | UTM zone 54S subset (Gulf St Vincent) stays in bounds |
-
-### Python ↔ Rust Regression Tests (184 total)
-
-| Test file | Sensor | Tests | Command |
-|-----------|--------|-------|---------|
-| test_landsat_regression.py | Landsat 8/9 | 28 | `pytest tests/regression/test_landsat_regression.py -v` |
-| test_landsat_rust_vs_python.py | Landsat 8/9 | 7 | `pytest tests/regression/test_landsat_rust_vs_python.py -v -s` |
-| test_benchmark_rust_vs_python.py | Landsat 8/9 | 6 | `pytest tests/regression/test_benchmark_rust_vs_python.py -v -s` |
-| test_sentinel2_regression.py | Sentinel-2 | 19 | `pytest tests/regression/test_sentinel2_regression.py -v` |
-| test_s2_rust_vs_python.py | Sentinel-2 | 8 | `pytest tests/regression/test_s2_rust_vs_python.py -v -s` |
-| test_s2_benchmark_rust_vs_python.py | Sentinel-2 | 7 | `pytest tests/regression/test_s2_benchmark_rust_vs_python.py -v -s` |
-| test_s2_atcor_perf.py | Sentinel-2 | 20 | `pytest tests/regression/test_s2_atcor_perf.py -v -s [--runslow]` |
-| test_s3_rust_vs_python.py | Sentinel-3 | 15 | `pytest tests/regression/test_s3_rust_vs_python.py -v` |
-| test_s3_benchmark_rust_vs_python.py | Sentinel-3 | 9 | `pytest tests/regression/test_s3_benchmark_rust_vs_python.py -v -s` |
-| test_pace_regression.py | PACE OCI | 17 | `pytest tests/regression/test_pace_regression.py -v` |
-| test_pace_rust_vs_python.py | PACE OCI | 14 | `pytest tests/regression/test_pace_rust_vs_python.py -v -s` |
-| test_pace_dsf_rust_vs_python.py | PACE OCI (Chesapeake) | 12 | `pytest tests/regression/test_pace_dsf_rust_vs_python.py -v` |
-| test_pace_sa_dsf_rust_vs_python.py | PACE OCI (SA ROI) | 12 | `pytest tests/regression/test_pace_sa_dsf_rust_vs_python.py -v` |
-| test_pace_sa_fullscene_benchmark.py | PACE OCI (SA full scene) | 10 | `pytest tests/regression/test_pace_sa_fullscene_benchmark.py -v -s` |
-| test_subset_all_sensors.py | All 4 sensors (subset/limit) | 11 | `pytest tests/regression/test_subset_all_sensors.py -v -s` |
-| conftest.py | — | — | Shared pytest config, tolerances, CLI options |
-
-### Performance Benchmarks
-
-| Sensor | Scene | Rust | Python | Speedup | Notes |
-|--------|-------|------|--------|---------|-------|
-| Landsat 8 | Full scene (62M px × 7 bands) | 66s | 180s | 2.7× | |
-| Landsat 9 | Full scene (62M px × 7 bands) | 56s | 180s | 3.2× | |
-| Sentinel-2 A | Full scene (30M px × 11 bands) | 20s | 148s | **7.3×** | Real S2A T54HTF, fixed DSF |
-| Sentinel-2 B | Full scene (30M px × 11 bands) | 64s | 173s | 2.7× | |
-| Sentinel-3 OLCI | Subset 213×205 × 21 bands | 3.2s | 7.8s | **2.5×** | Subset reads + RSR convolution fix; first-run LUT load ~50s |
-| PACE OCI | ROI 108×57 (fixed) | 22s | 145s | 6.8× | |
-| PACE OCI | Full 1710×1272 (fixed) | **84s** | 230s | **2.7×** | Load=12s, AC=34s, Write=35s |
-
-**Optimizations applied:**
-- PACE: Bulk NetCDF reads (3 detector reads vs 291 per-band) + rayon parallel AC
-- Sentinel-3: Direct subset NetCDF reads (avoid full-array-then-slice) + RSR convolution + TPG fix
-- All sensors: rayon parallel band correction
-- Accuracy: S2/Landsat/PACE R≥0.999; S3 R=0.983 (AOT gap under investigation — see Phase C notes)
-
-### S2A Real Data Regression (T54HTF, 2024-03-21, fixed DSF)
-
-Per-pixel comparison against Python ACOLITE (25M pixels per band):
-
-| Band | λ nm | Pearson R | RMSE | Bias | %<0.01 | %<0.05 |
-|------|------|-----------|------|------|--------|--------|
-| B01 | 443 | 1.000000 | 0.000013 | +0.000013 | 100.0% | 100.0% |
-| B02 | 492 | 1.000000 | 0.000015 | +0.000015 | 100.0% | 100.0% |
-| B03 | 560 | 1.000000 | 0.000202 | -0.000183 | 100.0% | 100.0% |
-| B04 | 665 | 1.000000 | 0.000397 | +0.000294 | 100.0% | 100.0% |
-| B05 | 704 | 1.000000 | 0.001000 | -0.000686 | 100.0% | 100.0% |
-| B06 | 740 | 1.000000 | 0.001416 | -0.000898 | 100.0% | 100.0% |
-| B07 | 783 | 1.000000 | 0.001320 | -0.000799 | 100.0% | 100.0% |
-| B08 | 833 | 1.000000 | 0.007184 | -0.004201 | 75.7% | 100.0% |
-| B8A | 865 | 1.000000 | 0.000023 | -0.000012 | 100.0% | 100.0% |
-| B11 | 1614 | 1.000000 | 0.000240 | -0.000120 | 100.0% | 100.0% |
-| B12 | 2202 | 1.000000 | 0.001887 | -0.000935 | 100.0% | 100.0% |
-
-**Mean R=1.000000, Mean RMSE=0.001245, 100% pixels within 0.05**
-Model: MOD1 ✓, AOT: 0.0110 ✓ (exact match)
-Rust: 20.3s (Load 2.6s + AC 8.8s + Write 7.7s), Python: 147.9s → **7.3× speedup**
-
-### Quick Commands
-
-```bash
-# All Rust tests
-cargo test --features full-io
-
-# All Python regression (Tier 1+2, no real data)
-pytest tests/regression/ -v
-
-# Sentinel-2 fixed-mode regression (requires cached S2 data)
-pytest tests/regression/test_s2_rust_vs_python.py -v -s
-
-# Full regression with real data
-pytest tests/regression/ -v --runslow \
-  --pace-file /path/to/PACE_OCI.L1B.nc \
-  --landsat-file /path/to/LC08_L1TP_... \
-  --s2-file /path/to/S2A_MSIL1C_....SAFE
-```
-
-## Current State
-
-- **135 Rust tests** (34 unit + 8 integration + 15 Landsat e2e + 5 PACE e2e + 18 S2 e2e + 27 S3 e2e + 12 S3 proptest + 19 all-sensors proptest)
-- **195 Python regression tests**
-- **6 examples** (Landsat, Landsat AWS, PACE, Sentinel-2, Sentinel-2 AC, Sentinel-3)
-- **Clean architecture**: loader → ac → writer
-- **Dual output**: GeoZarr (hyperspectral) + COG (multi/superspectral)
-- **Physics-equivalent**: S2 RMSE < 0.002, Landsat RMSE < 0.02, PACE full-scene R=1.0000; S3 R=0.983 (AOT gap: 0.076 Rust vs 0.057 Python — under investigation)
-- **Auto-download**: Sensor-specific aerosol LUTs fetched on first use from GitHub
-- **No unwrap() in library code** (all replaced with proper error propagation)
-- **PACE full-scene validated**: 1710×1272 × 291 bands, Mean RMSE=0.004, 100% within 0.05
-- **S2A real-data validated**: 5490×5490 × 11 bands, Mean R=1.000, Mean RMSE=0.001, 7.3× speedup
-
-## Porting Methodology — Multi-Agent Orchestration
-
-The Rust port uses an AI-assisted workflow where two coding agents collaborate
-via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/):
-
-```mermaid
-flowchart TB
-    subgraph Orchestrator["tools/agent_harness.py"]
-        direction TB
-        Task["User provides --task"] --> Kiro
-
-        subgraph Kiro["Kiro CLI — Executor"]
-            K1["kiro-cli acp --agent NAME"]
-        end
-
-        subgraph Copilot["Copilot CLI — Proposer"]
-            C1["copilot --acp --stdio"]
-        end
-
-        Kiro -- "ACP session/update\n(streamed output)" --> Loop
-        Loop["Proposal Loop"] -- "Kiro output as context" --> Copilot
-        Copilot -- "ACTION: proposals" --> Loop
-        Loop -- "Display proposals" --> Human["Human Console\n(approve / reject)"]
-        Human -- "Approved actions" --> Kiro
-    end
-
-    Kiro <-. "JSON-RPC 2.0\nNDJSON / stdio" .-> ACP["Agent Client Protocol\ninitialize → session/new → session/prompt\n↕ session/update notifications"]
-    Copilot <-. "JSON-RPC 2.0\nNDJSON / stdio" .-> ACP
-
-    style Orchestrator fill:#1a1a2e,stroke:#e94560,color:#eee
-    style Kiro fill:#0f3460,stroke:#e94560,color:#eee
-    style Copilot fill:#0f3460,stroke:#16213e,color:#eee
-    style Human fill:#533483,stroke:#e94560,color:#eee
-    style ACP fill:#16213e,stroke:#0f3460,color:#eee
-```
-
-**Data flow:**
-1. User sends `--task` → Orchestrator → Kiro (ACP prompt)
-2. Kiro streams output ← `session/update` chunks
-3. Kiro output → Copilot (ACP prompt for review)
-4. Copilot proposes `ACTION:` lines
-5. Human approves → approved actions → Kiro
-6. Repeat 2–5 until `DONE` or max cycles
-
-### Workflow per Sensor
-
-```bash
-# Example: port a new sensor loader
-python tools/agent_harness.py \
-    --task "Port acolite/sentinel3/ to src/loader/sentinel3.rs following the
-            Landsat and Sentinel-2 patterns. Read JP2/NetCDF bands, parse
-            geometry XML, and produce BandData arrays." \
-    --kiro-agent rust-developer \
-    --workdir /path/to/acolite
-
-# Example: fix regression failures
-python tools/agent_harness.py \
-    --task "The Sentinel-3 OLCI regression test has RMSE=0.05.
-            Investigate gas transmittance differences and fix." \
-    --auto-approve
-```
-
-### Agent Roles
-
-| Agent | CLI | Role | ACP Launch |
-|-------|-----|------|------------|
-| **Kiro** | `kiro-cli acp` | Executor — writes code, runs tests, reads files | `kiro-cli acp --agent rust-developer` |
-| **Copilot** | `copilot --acp --stdio` | Proposer — reviews progress, suggests next steps | `copilot --acp --stdio` |
-| **Human** | terminal | Approver — filters proposals before dispatch | Interactive prompt |
-
-### Protocol Details
-
-Both agents speak ACP (JSON-RPC 2.0 over NDJSON stdio):
-
-- **`initialize`** — negotiate capabilities (`protocolVersion: 1` for both agents)
-- **`session/new`** — create a workspace-scoped session with `cwd`
-- **`session/prompt`** — send a user message (Kiro uses `content` field, Copilot uses `prompt` field)
-- **`session/update`** — streamed notifications: `agent_message_chunk`, `tool_call`, `turn_end`
-- **`session/cancel`** — interrupt processing
-
-### When to Use the Harness
-
-- **New sensor port**: Kiro writes the loader + example + tests, Copilot cross-checks against Python source
-- **Regression debugging**: Kiro investigates numerical differences, Copilot proposes diagnostic steps
-- **Bulk porting**: Chain multiple `--task` invocations for loader → AC → writer per sensor
-- **Code review**: Copilot can review Kiro's output against project conventions (`.github/copilot-instructions.md`)
-
-### Files
-
-- **`tools/agent_harness.py`** — Orchestrator script (652 lines)
-- **`.github/copilot-instructions.md`** — Project conventions fed to both agents
-- **`.github/skills/rust-porting/SKILL.md`** — Porting knowledge base
-- **`.github/skills/regression-testing/SKILL.md`** — Test writing knowledge base
-
-## Completed ✅
-
-### Phase A: Architecture
-- [x] Loader → AC → Writer restructure
-- [x] Secure credentials (zeroize, .netrc, env vars)
-- [x] Single search/download/reader implementations
-- [x] PACE OCI L1B NetCDF reader
-- [x] OBDAAC CMR search (collection_id based)
-- [x] GeoZarr writer (zarrs crate, Zarr V3, gzip, CF metadata)
-- [x] Auto-dispatch writer (>50 bands → GeoZarr, ≤50 → COG)
-- [x] f32 pipeline path for pre-calibrated sensors (PACE)
-
-### Phase B: Real Atmospheric Correction
-- [x] LUT loading — sensor-specific 6SV NetCDF LUTs, multi-pressure stacking
-- [x] N-dimensional interpolation (RegularGridInterpolator equivalent)
-- [x] Gas transmittance — O₃/H₂O/CO₂/O₂ from ko3 data + RSR convolution
-- [x] DSF algorithm — dark spectrum extraction (intercept method), AOT inversion, model selection
-- [x] Tiled DSF — 200×200 tile grid, per-tile AOT, most-common model voting
-- [x] Fixed DSF — whole-scene dark spectrum, single AOT
-- [x] Surface reflectance correction — `rhos = (rhot/tt_gas - romix) / (dutott + astot*(rhot/tt_gas - romix))`
-- [x] Multi-model selection — MOD1 (Continental) + MOD2 (Maritime), min RMSD
-- [x] Ancillary data download — OBPG ozone + GMAO MERRA2 MET via EarthData
-- [x] Ancillary-aware pipeline — ProcessingConfig.from_ancillary() with pressure/ozone/wv
-- [x] Landsat MTL integration — load_landsat_scene() auto-parses MTL for geometry
-- [x] Landsat reflectance coefficients — parse_reflectance_coeffs() from MTL
-- [x] STAC Landsat download — search_landsat_c2() + download_stac_landsat()
-- [x] GDAL optional — tiff-crate fallback when gdal-support feature disabled
-- [x] Sun glint correction — Cox-Munk + Fresnel model (compute_rsky, glint_correct)
-- [x] Sentinel-3 OLCI full pipeline — SEN3 NetCDF loader, smile correction, TPG interpolation, full DSF
-- [x] Sentinel-3 OLCI limit subsetting — subset radiance, TPGs, and detector_index consistently
-- [x] Generic aerosol LUT support — hyperspectral LUTs convolved at runtime via Gaussian RSR
-
-### Phase C: Validation
-- [x] Landsat 8/9 Rust vs Python — R>0.998, RMSE<0.02
-- [x] Sentinel-2 A/B Rust vs Python — R=1.000, RMSE<0.002 (physics-equivalent)
-- [x] PACE OCI Rust vs Python — r=0.9995
-- [x] Sentinel-3 OLCI Rust vs Python — R=0.983, RMSE=0.0011 (full DSF, real data; **below R>0.999 target** — known AOT gap: 0.076 Rust vs 0.057 Python from RegularGridInterpolator vs scipy RGI differences)
-
-### Phase E: Production Hardening (partial)
-- [x] Remove all `unwrap()` from library code (proper error propagation)
-- [x] S2 RADIO_ADD_OFFSET support (processing baseline ≥ 4.0)
-- [x] CLI args: `--model auto|MOD1|MOD2`, `--aot-mode tiled|fixed`
-
-## Next Steps
-
-### Phase D — Additional Loaders
-- [x] Sentinel-3 OLCI (NetCDF) — full pipeline: SEN3 loader, smile, TPG interp, generic-LUT DSF
-- [ ] PRISMA/DESIS/EnMAP (HDF5)
-- [ ] EMIT (NetCDF)
-
-### Phase E — Production Hardening (remaining)
-- [x] ROI subsetting (limit parameter) — all 4 sensors, UTM-aware pure-Rust Karney conversion
-- [x] Sun glint correction (rsky) — Cox-Munk + Fresnel, --glint-correction flag
-- [x] Ancillary data download (OBPG ozone/met via EarthData)
-- [x] Ancillary-aware ProcessingConfig (pressure, ozone, water vapour from downloads)
-- [x] Auto-download sensor-specific aerosol LUTs from GitHub
-- [x] S3 OLCI RSKY grid mismatch fix — R improved from 0.983 to >0.999 (Karney RGI interpolation)
-- [ ] Ancillary data interpolation — spatial+temporal bilinear interp of MERRA2 to scene centre
-- [ ] DEM-derived pressure — barometric formula from SRTM elevation at scene centre
-- [ ] Streaming processing for large scenes
-- [ ] CLI matching Python ACOLITE settings files
-- [ ] NetCDF L2R output matching Python ACOLITE format (unblocks Phase F)
-
-### Phase F — Water Products (L2W)
-- [ ] Port `acolite_l2w.py` parameter computation
-- [ ] Chlorophyll-a (OC algorithms)
-- [ ] TSS (Nechad, Dogliotti)
-- [ ] Turbidity
-
-## Dependencies
-
-```toml
-gdal = "0.17"        # GeoTIFF/JP2 read/write
-ndarray = "0.15"     # Array processing
-rayon = "1.8"        # Parallelism
-zarrs = "0.23"       # Zarr V3 (GeoZarr output)
-tiff = "0.9"         # Fallback TIFF writing
-reqwest = "0.11"     # HTTP
-serde = "1.0"        # Serialization
-chrono = "0.4"       # DateTime
-thiserror = "1.0"    # Error types
-zeroize = "1.8"      # Credential security
-netcdf = "0.9"       # LUT/PACE/S3 NetCDF (optional, full-io feature)
-```
+---
+
+## Completed ✅ (Phases A–C, 12 active days)
+
+- 4 sensor loaders (Landsat, S2, S3, PACE)
+- Full LUT-DSF atmospheric correction (fixed + tiled)
+- N-dimensional LUT interpolation
+- Gas transmittance (O₃, H₂O, CO₂, O₂)
+- Sun glint correction (Cox-Munk + Fresnel)
+- Geographic subsetting (all 4 sensors, UTM-aware)
+- Ancillary download (OBPG + MERRA2)
+- COG + GeoZarr output
+- Sensor-specific LUT auto-download
+- 135 Rust tests + 195 Python regression tests
+- Performance: 2.5–7.3× speedup across all sensors
+
+---
+
+## Key Metrics
+
+| Metric | Current | End Target |
+|--------|---------|-----------|
+| Python LOC covered | 9,758 (18%) | 55,342 (100%) |
+| Rust LOC | 13,014 | ~55,000–60,000 |
+| Sensors ported | 4 / 40 | 40 / 40 |
+| Test count | 330 | ~800–1,000 |
+| Mean speedup | 3.4× | 3–5× (target) |
+| Agent-days spent | 12 | ~74 total |
