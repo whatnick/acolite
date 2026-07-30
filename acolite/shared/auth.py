@@ -5,7 +5,6 @@
 ## modifications: 2025-04-03 (QV) added run settings
 ##                2025-07-09 (QV) added token option
 
-
 def auth(machine):
     import netrc
     import os
@@ -17,7 +16,11 @@ def auth(machine):
     try:
         nr = netrc.netrc(os.environ['NETRC'])
     except KeyError:
-        nr = netrc.netrc()
+        if os.path.exists(os.path.expanduser('~/.netrc')):
+            nr = netrc.netrc()
+    except:
+        pass
+
     try:
         ret = nr.authenticators(machine)
         if ret is not None:

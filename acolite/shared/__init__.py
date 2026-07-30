@@ -1,5 +1,11 @@
 import acolite.shared.position
 import acolite.shared.limit
+import acolite.shared.netcdf
+import acolite.shared.sftp
+import acolite.shared.array
+import acolite.shared.wopp
+import acolite.shared.xr
+
 from .auth import auth
 
 from .f0_get import *
@@ -75,9 +81,9 @@ from .square_response import *
 from .sun_position import *
 from .rsr_hyper import *
 from .interp2d import *
-from .derivative import *
 from .plane_fit import *
 from .stats import *
+from .glint_angle import *
 
 from .polylakes import *
 

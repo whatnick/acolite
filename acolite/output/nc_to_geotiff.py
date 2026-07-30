@@ -10,6 +10,7 @@
 ##                2021-11-20 (QV) added match_file to extract projection from (esp if data is using RPC for geolocation?)
 ##                2021-12-08 (QV) added support for the netcdf projection
 ##                2022-03-22 (QV) added support for match_file with GCP
+##                2023-09-22 (QV) update Landsat file to shift to PixelIsPoint
 ##                2024-02-27 (QV) changed writing of nodata, changed COG options
 ##                2024-03-14 (QV) update settings handling
 ##                                removed some keywords
@@ -17,6 +18,7 @@
 ##                2025-02-19 (QV) use settings.merge
 ##                2025-05-21 (QV) update settings parsing
 ##                2025-07-28 (QV) use export_geotiff_use_projection_key from settings
+##                2026-05-04 (QV) removed PixelIsPoint update
 
 def nc_to_geotiff(f, settings = None, datasets = None):
     import acolite as ac
@@ -71,6 +73,7 @@ def nc_to_geotiff(f, settings = None, datasets = None):
             dt = None
             print('Wrote {}'.format(outfile))
             outfiles.append(outfile)
+
     else:
         tags = ['xrange', 'yrange', 'pixel_size', 'proj4_string']
         if all([t in gem.gatts for t in tags]) or (match_file is not None):

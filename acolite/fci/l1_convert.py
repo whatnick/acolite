@@ -8,6 +8,7 @@
 ##                2025-05-12 (QV) added geolocation/geometry, radiance conversion and subsetting
 ##                2025-05-13 (QV) converted to l1_convert function
 ##                2026-02-05 (QV) changed column and row ranges for different ssd
+##                2026-07-09 (QV) set column/row range for uncropped data
 
 def l1_convert(inputfile, output = None, settings = None):
     import os, json
@@ -134,7 +135,7 @@ def l1_convert(inputfile, output = None, settings = None):
             ## output name
             oname = '{}_{}'.format(gatts['sensor'], dt.strftime('%Y_%m_%d_%H_%M_%S'))
             if setu['region_name'] != '': oname+='_{}'.format(setu['region_name'])
-            ofile = '{}/{}_{}.nc'.format(output, oname, gatts['acolite_file_type'])
+            ofile = '{}/{}_{}'.format(output, oname, gatts['acolite_file_type'])
             ofile += '_{:.1f}km.nc'.format(ssd)
             gatts['oname'] = oname
             gatts['ofile'] = ofile
@@ -166,6 +167,9 @@ def l1_convert(inputfile, output = None, settings = None):
                 lat = lat[row_range[0]:row_range[1], column_range[0]:column_range[1]]
                 vaa = vaa[row_range[0]:row_range[1], column_range[0]:column_range[1]]
                 vza = vza[row_range[0]:row_range[1], column_range[0]:column_range[1]]
+            else:
+                column_range = [0, lon.shape[1]]
+                row_range = [0, lon.shape[0]]
 
             ## get sun geometry
             print('Computing sun position for {}'.format(dt.isoformat()))

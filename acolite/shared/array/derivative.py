@@ -2,8 +2,8 @@
 ## returns derivative and second derivative
 ## written by Quinten Vanhellemont, RBINS
 ## 2025-05-07
-## modifications:
-##
+## modifications: 2026-06-01 (QV) added gradient based functions derg and derg2
+##                                moved to shared.array
 
 def der(x, y):
     import numpy as np
@@ -19,3 +19,13 @@ def der2(x, y):
     xd1, yd1 = der(x, y)
     xd2, yd2 = der(xd1, yd1)
     return(xd2, yd2)
+
+def derg(x, y, axis = 0):
+    import numpy as np
+    res = np.gradient(y, x, axis = axis)
+    return(res)
+
+def derg2(x, y, axis = 0):
+    res = derg(x, y, axis = axis)
+    res2 = derg(x, res, axis = axis)
+    return(res2)

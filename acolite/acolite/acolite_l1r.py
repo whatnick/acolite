@@ -341,6 +341,27 @@ def acolite_l1r(bundle, input_type=None):
     ## end Hyperfield
     ################
 
+    ################
+    ## OCSMART
+    if input_type == 'OCSMART':
+        l1r_files, setu = ac.convert.ocsmart(bundle)
+    ## end OCSMART
+    ################
+
+    ################
+    ## POLYMER
+    if input_type == 'POLYMER':
+        l1r_files, setu = ac.convert.polymer(bundle)
+    ## end POLYMER
+    ################
+
+    ################
+    ## C2RCC
+    if input_type == 'C2RCC':
+        l1r_files, setu = ac.convert.c2rcc(bundle)
+    ## end C2RCC
+    ################
+
     ## remove extracted files
     for i, im in enumerate(identification):
         try:

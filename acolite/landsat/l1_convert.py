@@ -17,6 +17,8 @@
 ##                2025-02-02 (QV) removed percentiles
 ##                2025-02-04 (QV) improved settings handling
 ##                2025-02-10 (QV) cleaned up settings use, output naming
+##                2026-05-04 (QV) added half pixel to nc_projection x and y
+##                2026-06-08 (QV) moved landsat_azi_use_band to settings
 
 def l1_convert(inputfile, output = None, settings = None,
 
@@ -84,6 +86,8 @@ def l1_convert(inputfile, output = None, settings = None,
         meta = ac.landsat.metadata_read(mtl)
         fmeta = ac.landsat.metadata_bands(bundle, meta)
 
+        add_half_pixel = True ## add half pixel to get pixel centre positions
+
         ## get relevant data from meta
         if 'PRODUCT_CONTENTS' in meta: ## COLL2
             pk = 'IMAGE_ATTRIBUTES'
@@ -108,7 +112,6 @@ def l1_convert(inputfile, output = None, settings = None,
         global_dims = int(meta[rk]['REFLECTIVE_LINES']), int(meta[rk]['REFLECTIVE_SAMPLES'])
 
         ## some hard coded info
-        azi_use_band = '5'
         sat = 'L{}'.format(spacecraft_id[-1])
         pan_scale = 2
         satellite_sensor = None
@@ -141,8 +144,6 @@ def l1_convert(inputfile, output = None, settings = None,
                 thermal_bands = ['8']
             else:
                 thermal_bands = []
-            if sat in ['L4', 'L5']:
-                azi_use_band = '4'
         else:
             print(spacecraft_id, sensor_id)
             print('Not configured')
@@ -182,7 +183,7 @@ def l1_convert(inputfile, output = None, settings = None,
         sza = 90-float(meta[ik]['SUN_ELEVATION'])
         saa = float(meta[ik]['SUN_AZIMUTH'])
         ## compute view zenith angle
-        r,l,t,b, nadir_top, nadir_bottom,nadir_middle = ac.landsat.image_corners(bundle, meta, use_band = azi_use_band)
+        r,l,t,b, nadir_top, nadir_bottom,nadir_middle = ac.landsat.image_corners(bundle, meta, use_band = '{}'.format(setu['landsat_azi_use_band']))
         vaa = ac.shared.azimuth_two_points(nadir_top[0],nadir_top[1],nadir_bottom[0],nadir_bottom[1])
         raa = np.abs(saa-vaa)
         while raa > 180: raa = np.abs(360 - raa)
@@ -254,6 +255,7 @@ def l1_convert(inputfile, output = None, settings = None,
 
         ## get scene projection and extent
         dct = ac.landsat.projection(meta)
+        #dct = ac.shared.projection_read(fmeta['B1']['FILE'])
 
         ## full scene
         gatts['scene_xrange'] = dct['xrange']
@@ -304,13 +306,13 @@ def l1_convert(inputfile, output = None, settings = None,
 
         ## get projection info for netcdf
         if setu['netcdf_projection']:
-            nc_projection = ac.shared.projection_netcdf(dct_prj, add_half_pixel=False)
+            nc_projection = ac.shared.projection_netcdf(dct_prj, add_half_pixel = add_half_pixel)
             ## PAN band projection - not used but why not compute it
             dct_prj_pan = {k: dct_prj[k] for k in dct_prj}
             dct_prj_pan['pixel_size'] = dct_prj_pan['pixel_size'][0]/pan_scale, dct_prj_pan['pixel_size'][1]/pan_scale
             dct_prj_pan['xdim'] *= pan_scale
             dct_prj_pan['ydim'] *= pan_scale
-            nc_projection_pan = ac.shared.projection_netcdf(dct_prj_pan, add_half_pixel=False)
+            nc_projection_pan = ac.shared.projection_netcdf(dct_prj_pan, add_half_pixel = add_half_pixel)
         else:
             nc_projection = None
             nc_projection_pan = None
@@ -348,11 +350,11 @@ def l1_convert(inputfile, output = None, settings = None,
             new = True
             new_pan = True
 
-        if new: ## half pixel offset for writing geotiff
-            gatts['xrange'][0]-=gatts['pixel_size'][0]/2
-            gatts['yrange'][0]-=gatts['pixel_size'][1]/2
-            gatts['xrange'][1]-=gatts['pixel_size'][0]/2
-            gatts['yrange'][1]-=gatts['pixel_size'][1]/2
+        #if new: ## half pixel offset for writing geotiff
+        #    gatts['xrange'][0]-=gatts['pixel_size'][0]/2
+        #    gatts['yrange'][0]-=gatts['pixel_size'][1]/2
+        #    gatts['xrange'][1]-=gatts['pixel_size'][0]/2
+        #    gatts['yrange'][1]-=gatts['pixel_size'][1]/2
 
         ## copy thermal constants to metadata
         mts = ['LEVEL1_THERMAL_CONSTANTS', 'TIRS_THERMAL_CONSTANTS', 'THERMAL_CONSTANTS'] ## Coll2, Coll1 L8, Coll1 L5/7
@@ -424,7 +426,7 @@ def l1_convert(inputfile, output = None, settings = None,
         if (setu['output_geolocation']):
             if ('lat' not in datasets) or ('lon' not in datasets):
                 if verbosity > 1: print('Writing geolocation lon/lat')
-                lon, lat = ac.shared.projection_geo(dct_prj, add_half_pixel=False)
+                lon, lat = ac.shared.projection_geo(dct_prj, add_half_pixel = add_half_pixel)
                 gemo.write('lon', lon)
                 if verbosity > 1: print('Wrote lon')
                 gemo.write('lat', lat)
@@ -434,7 +436,7 @@ def l1_convert(inputfile, output = None, settings = None,
         if (setu['output_xy']):
             if ('xm' not in datasets) or ('ym' not in datasets):
                 if verbosity > 1: print('Writing geolocation x/y')
-                x, y = ac.shared.projection_geo(dct_prj, xy=True, add_half_pixel=False)
+                x, y = ac.shared.projection_geo(dct_prj, xy = True, add_half_pixel = add_half_pixel)
                 gemo.write('xm', x)
                 x = None
                 if verbosity > 1: print('Wrote xm')

@@ -29,6 +29,7 @@
 ##                2025-05-16 (QV) added filtering for sensor noise bias correction
 ##                2025-07-07 (QV) don't do model selection if only one model is used
 ##                2025-10-06 (QV) added dsf_aot_option=ancillary and dsf_aot_option=ancillary_fixed
+##                2026-04-13 (QV) added glint angle check for automatic glint correction
 
 def acolite_l2r(gem,
                 output = None,
@@ -44,7 +45,6 @@ def acolite_l2r(gem,
     import numpy as np
     import scipy.ndimage, scipy.interpolate, scipy.stats
     import acolite as ac
-    import skimage.measure
 
     time_start = datetime.datetime.now()
 
@@ -373,9 +373,8 @@ def acolite_l2r(gem,
                 gem.bands[b]['rhot_ds'] = 'rhot_{}_{}'.format(b, gem.bands[b]['wave_name'])
                 gem.bands[b]['rhos_ds'] = 'rhos_{}_{}'.format(b, gem.bands[b]['wave_name'])
             if setu['add_detector_name']:
-                dsname = rhot_ds[bi][5:]
-                gem.bands[b]['rhot_ds'] = 'rhot_{}'.format(dsname)
-                gem.bands[b]['rhos_ds'] = 'rhos_{}'.format(dsname)
+                gem.bands[b]['rhot_ds'] = 'rhot_{}_{}'.format(gem.gatts['band_detectors'][bi], gem.bands[b]['wave_name'])
+                gem.bands[b]['rhos_ds'] = 'rhos_{}_{}'.format(gem.gatts['band_detectors'][bi], gem.bands[b]['wave_name'])
             if setu['output_ed']:
                 gem.bands[b]['F0'] = f0_b[b]
                 gem.bands[b]['td_gas'] = tdg_b[b]
@@ -383,7 +382,7 @@ def acolite_l2r(gem,
                 if k not in ['wave']:
                     gem.bands[b][k] = tg_dict[k][b]
                     if setu['gas_transmittance'] is False: gem.bands[b][k] = 1.0
-            gem.bands[b]['wavelength']=gem.bands[b]['wave_nm']
+            gem.bands[b]['wavelength'] = gem.bands[b]['wave_nm']
 
             ## add sensor noise to band attributes
             if (setu['sensor_noise_bias_correction']) & (setu['sensor_noise'] is not None):
@@ -473,6 +472,7 @@ def acolite_l2r(gem,
 
     ## set up image segments
     if setu['dsf_aot_estimate'] == 'segmented':
+        import skimage.measure
         segment_data = {}
         rhot_ds = [ds for ds in gem.datasets if 'rhot_' in ds]
         finite_mask = np.isfinite(gem.data(rhot_ds[0]))
@@ -1423,7 +1423,8 @@ def acolite_l2r(gem,
             for sidx, segment in enumerate(segment_data):
                 aot_out[segment_data[segment]['sub']] = aot_sel[sidx]
         elif setu['dsf_aot_estimate'] == 'tiled':
-            aot_out = ac.shared.tiles_interp(aot_sel, xnew, ynew, target_mask=None, smooth=setu['dsf_tile_smoothing'], kern_size=setu['dsf_tile_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
+            aot_out = ac.shared.tiles_interp(aot_sel, xnew, ynew, target_mask = None, \
+                                            smooth = setu['dsf_tile_aot_smoothing'], kern_size = setu['dsf_tile_aot_smoothing_kernel_size'], method=setu['dsf_tile_interp_method'])
         else:
             if aot_sel.flatten().shape == (1,):
                 aot_out = np.repeat(aot_sel.flatten(), gem.gatts['data_elements']).reshape(gem.gatts['data_dimensions'])
@@ -1496,6 +1497,20 @@ def acolite_l2r(gem,
             gemo.write('rho_cirrus', rho_cirrus)
     print('use_revlut', use_revlut)
 
+    ## automatically set glint correction based on glint angle
+    if setu['dsf_residual_glint_correction_glint_angle']:
+        ## compute scene centre glint angle
+        glint_angle = ac.shared.glint_angle(gem.data_mem['sza'+'_mean'][0][0],
+                                            gem.data_mem['vza'+'_mean'][0][0],
+                                            gem.data_mem['raa'+'_mean'][0][0])
+        if glint_angle <= setu['dsf_residual_glint_correction_glint_angle_threshold']:
+            print('Setting dsf_residual_glint_correction=True as glint angle ({:.1f}) <= dsf_residual_glint_correction_glint_angle_threshold ({:.1f})'.format(glint_angle, setu['dsf_residual_glint_correction_glint_angle_threshold']))
+            setu['dsf_residual_glint_correction'] = True
+        else:
+            print('Setting dsf_residual_glint_correction=False as glint angle ({:.1f}) > dsf_residual_glint_correction_glint_angle_threshold ({:.1f})'.format(glint_angle, setu['dsf_residual_glint_correction_glint_angle_threshold']))
+            setu['dsf_residual_glint_correction'] = False
+    ## end automatically set glint correction based on glint angle
+
     hyper_res = None
     ## compute surface reflectances
     for bi, b in enumerate(gem.bands):
@@ -1513,6 +1528,17 @@ def acolite_l2r(gem,
 
         dsi = gem.bands[b]['rhot_ds']
         dso = gem.bands[b]['rhos_ds']
+
+        ## exclude/include band if requested
+        if setu['l2r_exclude_bands'] is not None:
+            if dso in setu['l2r_exclude_bands']:
+                print('Skipping {} which is in l2r_exclude_bands'.format(dso))
+                continue
+        if setu['l2r_include_bands'] is not None:
+            if dso not in setu['l2r_include_bands']:
+                print('Skipping {} which is not in l2r_include_bands'.format(dso))
+                continue
+
         cur_data, cur_att = gem.data(dsi, attributes=True)
 
         ## store rhot in output file
@@ -1883,7 +1909,7 @@ def acolite_l2r(gem,
             del cos2omega
 
             ## read and resample refractive index
-            refri = ac.ac.refri()
+            refri = ac.shared.wopp.refri()
             refri_sen = ac.shared.rsr_convolute_dict(refri['wave']/1000, refri['n'], rsrd['rsr'])
 
             ## compute fresnel reflectance for the reference bands

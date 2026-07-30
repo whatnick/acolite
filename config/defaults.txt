@@ -53,12 +53,21 @@ convert_l2=False
 add_band_name=False
 add_detector_name=False
 
+## include/exclude bands from L1R or L2R files
+## named as the dataset would appear in the output NetCDF
+## starting with rhot_ for l1r and rhos_ for l2r
+## l1r currently only for PACE/OCI, l2r only for DSF
+l1r_include_bands=None
+l1r_exclude_bands=None
+l2r_include_bands=None
+l2r_exclude_bands=None
+
 ## compute contrabands
 compute_contrabands=False
 
 ## netcdf options
 netcdf_projection=True
-netcdf_compression=False
+netcdf_compression=True
 netcdf_compression_level=4
 netcdf_compression_least_significant_digit=None
 netcdf_discretisation=False
@@ -67,6 +76,7 @@ netcdf_metadata_profile=beam
 ## Landsat options
 landsat_qa_bands=PIXEL,RADSAT,SATURATION,AEROSOL
 landsat_qa_output=False
+landsat_azi_use_band=5
 
 ## Sentinel-2 options
 s2_target_res=10
@@ -99,7 +109,7 @@ sensor_noise_bias_correction_resampling=None
 sensor_noise=None
 
 ## Sentinel-3 options
-smile_correction=True
+smile_correction=False
 smile_correction_tgas=True
 use_tpg=False
 use_supplied_ancillary=True
@@ -338,6 +348,8 @@ wind_default=2
 dsf_residual_glint_correction=False
 dsf_residual_glint_correction_method=default
 dsf_residual_glint_wave_range=1500,2400
+dsf_residual_glint_correction_glint_angle=False
+dsf_residual_glint_correction_glint_angle_threshold=40
 glint_force_band=None
 glint_mask_rhos_wave=1600
 glint_mask_rhos_threshold=0.05
@@ -448,9 +460,12 @@ dsf_fixed_lut=ACOLITE-LUT-202110-MOD2
 dsf_tile_dimensions=100,100
 
 ## tiled processing options
-dsf_tile_smoothing=True
+dsf_tile_smoothing=False
 dsf_tile_smoothing_kernel_size=3
 dsf_tile_interp_method=linear
+dsf_tile_aot_smoothing=True
+dsf_tile_aot_smoothing_kernel_size=3
+dsf_tile_aot_interp_method=linear
 
 ## exponential options
 exp_mask_threshold=0.0215
@@ -481,6 +496,7 @@ rgb_rhosu=False
 rgb_rhoe=False
 rgb_rhorc=False
 rgb_rhow=False
+rgb_Rrs=False
 map_l1r=False
 map_l2r=False
 map_l2t=False
@@ -488,7 +504,7 @@ map_l2w=False
 
 # rgb maps to output per file type
 l1r_rgb_keys=rhot
-l2r_rgb_keys=rhos,rhosu,rhorc,rhotc,rhoe
+l2r_rgb_keys=rhos,rhosu,rhorc,rhotc,rhoe,Rrs
 l2w_rgb_keys=rhow
 
 # mapping options
@@ -624,6 +640,7 @@ lut_models=1,2
 lut_pressures=500,750,1013,1100
 lut_base_interface=ACOLITE-RSKY-202102-82W
 luts_reduce_dimensions=False
+luts_keep_extracted=True
 slicing=False
 
 # CDSE or EarthExplorer download

@@ -297,6 +297,11 @@ def identify_bundle(bundle, input_type = None, output = None):
                 (gatts['instrument'] in ['HAWKEYE']):
                 input_type = 'SeaDAS'
                 break ## exit loop
+            ## SeaDAS l2gen data
+            datasets = ac.shared.nc_datasets(bundle, group = 'geophysical_data')
+            if ('Level-2 Data OC' in gatts['title']) & (len(datasets) != 0):
+                input_type = 'SeaDAS'
+                break ## exit loop
         except:
             pass ## continue to next sensor
         ## end SeaDAS L1B
@@ -670,6 +675,25 @@ def identify_bundle(bundle, input_type = None, output = None):
         except:
             pass ## continue to next sensor
         ## end Huanjing
+        ################
+
+        ################
+        ## OCSMART, POLYMER, and C2RCC
+        try:
+            gatts = ac.shared.nc_gatts(bundle)
+            groups_dict = ac.shared.nc_groups(bundle)
+            if (gatts == {}) & (groups_dict != {}):
+                input_type = 'OCSMART'
+                break ## exit loop
+            if (('dir_static' in gatts) & ('dir_common' in gatts)) & (groups_dict == {}):
+                input_type = 'POLYMER'
+                break ## exit loop
+            if (('C2RCC' in igatts['product_type'])) & (groups_dict == {}):
+                input_type = 'C2RCC'
+                break ## exit loop
+        except:
+            pass ## continue to next sensor
+        ## end OCSMART, POLYMER, and C2RCC
         ################
 
         ################

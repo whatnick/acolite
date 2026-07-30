@@ -48,6 +48,9 @@ grid_dir=$ACDIR/data/TACT/grid
 ## libRadtran directory
 libradtran_dir=$ACDIR/external/libRadtran-2.0.5
 
+## Hydrolight directory
+hydrolight_dir=$ACDIR/external/HE53
+
 ##
 ## other configuration
 ##
@@ -72,7 +75,7 @@ credentials_file=$ACDIR/config/credentials.txt
 EARTHDATA_urls=gsfc.nasa.gov,earthdatacloud.nasa.gov,cr.usgs.gov,ladsweb.modaps.eosdis.nasa.gov,oceandata.sci.gsfc.nasa.gov
 
 ## OceanData URL
-oceandata_url=http://oceandata.sci.gsfc.nasa.gov/getfile
+oceandata_url=https://oceandata.sci.gsfc.nasa.gov/getfile
 
 ## EarthExplorer API
 EARTHEXPLORER_api=https://m2m.cr.usgs.gov/api/api/json/stable

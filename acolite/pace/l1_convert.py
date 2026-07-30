@@ -16,6 +16,7 @@
 ##                2025-03-03 (QV) added support for gains
 ##                2025-03-17 (QV) fixed application of gains
 ##                2025-03-18 (QV) fix for when no limit or sub is supplied
+##                2026-05-27 (QV) added inputfile to gatts, fix for band_data subsetting in level2 conversion
 
 def l1_convert(inputfile, output = None, settings = None):
     import os, json
@@ -119,7 +120,7 @@ def l1_convert(inputfile, output = None, settings = None):
             time = dateutil.parser.parse(isodate)
 
             ## output attributes
-            gatts = {'sensor': sensor, 'isodate': time.isoformat()}
+            gatts = {'sensor': sensor, 'isodate': time.isoformat(), 'inputfile': file}
             gatts['acolite_file_type'] = acolite_file_type
             oname =  '{}_{}'.format(gatts['sensor'],  time.strftime('%Y_%m_%d_%H_%M_%S'))
             if setu['merge_tiles']: oname+='_merged'
@@ -180,6 +181,7 @@ def l1_convert(inputfile, output = None, settings = None):
             band_waves = []
             band_widths = []
             band_irradiance = []
+            band_detectors = []
             for det in ['blue', 'red', 'SWIR']:
                 print('Reading data from detector {}'.format(det))
                 f0_det, f0_att = ac.shared.nc_data(file, '{}_solar_irradiance'.format(det), \
@@ -201,7 +203,9 @@ def l1_convert(inputfile, output = None, settings = None):
                 for wi, wave in enumerate(wv_det):
                     if not np.isfinite(wave): continue
 
-                    att = {'f0': f0_det[wi], 'wave': wave, 'wave_name': '{:.0f}'.format(wave), 'width': bp_det[wi]}
+                    att = {'f0': f0_det[wi], 'wave': wave, 'wave_nm': wave, 'wave_name': '{:.0f}'.format(wave),
+                           'width': bp_det[wi], 'detector': det}
+                    ds_name = 'rhot_{}_{}'.format(det, att['wave_name'])
 
                     ## track gains
                     if setu['gains']:
@@ -230,11 +234,22 @@ def l1_convert(inputfile, output = None, settings = None):
                         att['wave_name'] = rsrd_swir['PACE_OCI_SWIR']['wave_name'][swir_b]
                     ## end SWIR gain and band name
 
+                    ## track band even if it would be excluded
                     band_waves.append(att['wave'])
                     band_widths.append(att['width'])
                     band_irradiance.append(att['f0'])
+                    band_detectors.append(att['detector'])
 
-                    ds_name = 'rhot_{}_{}'.format(det, att['wave_name'])
+                    ## exclude/include band if requested
+                    if setu['l1r_exclude_bands'] is not None:
+                        if ds_name in setu['l1r_exclude_bands']:
+                            print('Skipping {} which is in l1r_exclude_bands'.format(ds_name))
+                            continue
+                    if setu['l1r_include_bands'] is not None:
+                        if ds_name not in setu['l1r_include_bands']:
+                            print('Skipping {} which is not in l1r_include_bands'.format(ds_name))
+                            continue
+
                     if setu['merge_tiles']:
                         if ds_name not in gemo.data_mem:
                             gemo.data_mem[ds_name] = np.zeros(data_shape) + np.nan
@@ -249,6 +264,7 @@ def l1_convert(inputfile, output = None, settings = None):
             gatts['band_waves'] = band_waves
             gatts['band_widths'] = band_widths
             gatts['band_irradiance'] = band_irradiance
+            gatts['band_detectors'] = band_detectors
             if setu['gains']: gatts['band_gains'] = band_gains
 
             ## compute relative azimuth
@@ -281,8 +297,18 @@ def l1_convert(inputfile, output = None, settings = None):
                     print(d.shape)
                     for wi in range(d.shape[2]):
                         ds_att = {k: att[k] for k in att}
-                        for k in band_atts: ds_att[k] = band_atts[k][wi]
+
+                        ## find index of current band wavelenth_3d in sensor band parameters wavelength
+                        wi_ = np.argsort(np.abs(band_atts['wavelength'] - band_atts['wavelength_3d'][wi]))[0]
+                        for k in band_atts:
+                            if k == 'wavelength_3d':
+                                ds_att[k] = band_atts[k][wi]
+                            else:
+                                ds_att[k] = band_atts[k][wi_]
+                        ## add wave_nm alias
+                        ds_att['wave_nm'] = ds_att['wavelength_3d']
                         ds_out = '{}_{}'.format(ds_name, ds_att['wavelength_3d'])
+
                         if setu['merge_tiles']:
                             if ds_out not in gemo.data_mem:
                                 gemo.data_mem[ds_out] = np.zeros(data_shape) + np.nan

@@ -8,6 +8,7 @@ from acolite import venus
 from acolite import ikonos
 from acolite import viirs
 from acolite import seadas
+from acolite import convert
 from acolite import avhrr
 
 from acolite import chris
@@ -51,11 +52,13 @@ from acolite import shared
 from acolite import dem
 from acolite import ged
 from acolite import masking
+from acolite import map
 
 from acolite import tact
 from acolite import acolite
 from acolite import adjacency
 from acolite import glint
+from acolite import hdsf
 
 from acolite import gem
 from acolite import parameters
