@@ -3,10 +3,8 @@
 [![Rust CI](https://github.com/whatnick/acolite/actions/workflows/rust.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/rust.yml)
 [![S3 Benchmark](https://github.com/whatnick/acolite/actions/workflows/s3-benchmark.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/s3-benchmark.yml)
 [![Landsat Benchmark](https://github.com/whatnick/acolite/actions/workflows/landsat-benchmark.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/landsat-benchmark.yml)
-[![S3 Speedup](https://img.shields.io/badge/S3_OLCI-44×_faster-brightgreen)](BENCHMARK_RESULTS.md)
-[![Landsat Speedup](https://img.shields.io/badge/Landsat_8/9-pending-yellow)](BENCHMARK_RESULTS.md)
-[![Rust](https://img.shields.io/badge/Rust-2.5s_(S3)-blue)](BENCHMARK_RESULTS.md)
-[![Python](https://img.shields.io/badge/Python-110s_(S3)-orange)](BENCHMARK_RESULTS.md)
+[![S3 OLCI](https://img.shields.io/badge/S3_OLCI-44×_faster-brightgreen)](BENCHMARK_RESULTS.md)
+[![Landsat 8/9](https://img.shields.io/badge/Landsat_8/9-pending-yellow)](BENCHMARK_RESULTS.md)
 
 ## Executive Summary
 
