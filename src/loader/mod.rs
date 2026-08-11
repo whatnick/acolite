@@ -156,13 +156,15 @@ fn infer_utm_zone_from_easting(_easting: f64) -> Option<u8> {
 
 /// Convert WGS-84 lat/lon (degrees) to UTM easting/northing (metres).
 /// Uses the standard Karney series approximation (accurate to ~1 mm).
-fn latlon_to_utm(lat_deg: f64, lon_deg: f64, zone: u8, _is_north: bool) -> (f64, f64) {
+fn latlon_to_utm(lat_deg: f64, lon_deg: f64, zone: u8, is_north: bool) -> (f64, f64) {
     use std::f64::consts::PI;
     let a = 6_378_137.0_f64;          // WGS-84 semi-major axis
     let f = 1.0 / 298.257_223_563;    // WGS-84 flattening
     let k0 = 0.9996;                   // UTM scale factor
     let e0 = 500_000.0;               // false easting
-    let n0 = if lat_deg < 0.0 { 10_000_000.0 } else { 0.0 }; // false northing
+    // False northing: 10M for UTM South zones, 0 for North zones.
+    // This must match the SCENE's coordinate convention, not the input latitude.
+    let n0 = if is_north { 0.0 } else { 10_000_000.0 };
 
     let lon0 = ((zone as f64 - 1.0) * 6.0 - 180.0 + 3.0).to_radians(); // central meridian
     let lat = lat_deg.to_radians();
