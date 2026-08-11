@@ -56,8 +56,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /tmp/acolite_landsat_cache
-          key: landsat-c2l1-scene-v1
-          restore-keys: landsat-c2l1-scene-
+          key: landsat-c2l1-scene-v3
+          restore-keys: landsat-c2l1-scene-v3
 
       - name: Install Python dependencies
         run: |
@@ -91,11 +91,18 @@ jobs:
           cache = Path(os.environ["ACOLITE_TEST_CACHE"])
           cache.mkdir(parents=True, exist_ok=True)
 
-          # Check for cached scene
+          # Check for cached scene (validate file size > 1MB to catch broken downloads)
           existing = list(cache.glob("LC0*"))
-          if existing and any(existing[0].glob("*_B1.TIF")):
-              print(f"✓ Cached: {existing[0].name}")
-              sys.exit(0)
+          if existing:
+              b1_files = list(existing[0].glob("*_B1.TIF"))
+              if b1_files and b1_files[0].stat().st_size > 1_000_000:
+                  print(f"✓ Cached: {existing[0].name}")
+                  sys.exit(0)
+              else:
+                  # Remove corrupted cache
+                  import shutil
+                  shutil.rmtree(existing[0])
+                  print(f"Removed corrupted cache: {existing[0].name}")
 
           # Search USGS STAC for a low-cloud Landsat 8/9 scene over SE Australia
           print("Searching USGS LandsatLook STAC...")
