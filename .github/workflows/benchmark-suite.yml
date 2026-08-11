@@ -34,8 +34,11 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-bench-${{ hashFiles('Cargo.lock') }}
-      - name: Build all examples
-        run: cargo build --release --features "full-io,gdal-support" --examples
+      - name: Build benchmark examples
+        run: |
+          cargo build --release --features "full-io,gdal-support" --example process_sentinel3
+          cargo build --release --features "full-io,gdal-support" --example process_sentinel2_ac
+          cargo build --release --features "full-io,gdal-support" --example process_landsat
       - name: Upload binaries
         uses: actions/upload-artifact@v5
         with:
@@ -44,7 +47,6 @@ jobs:
             target/release/examples/process_sentinel3
             target/release/examples/process_sentinel2_ac
             target/release/examples/process_landsat
-            data/
 
   # ─── S3 OLCI Benchmark ──────────────────────────────────────────────────────
   s3-olci:
