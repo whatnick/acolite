@@ -3,6 +3,7 @@
 
 ![S3 OLCI](https://img.shields.io/badge/S3_OLCI-44×_faster-brightgreen)
 ![Landsat 8/9](https://img.shields.io/badge/Landsat_8/9-9×_faster-brightgreen)
+![S2 MSI](https://img.shields.io/badge/S2_MSI-in_progress-yellow)
 ![Rust CI](https://github.com/whatnick/acolite/actions/workflows/rust.yml/badge.svg?branch=feature/rust-port)
 
 ---
@@ -26,13 +27,27 @@
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
 | **Processing time** | 62s | 7s | **9× faster** |
-| **Peak memory** | 1414 MB | 2672 MB | 89% more (see note) |
+| **Peak memory** | 1414 MB | 2672 MB | 89% more (note below) |
 
 **Scene**: LC08_L1TP_094085_20130408, SE Australia (Collection 1, GCS public)  
-**ROI**: 3763×3079 pixels (~1° × 1° subset at 30m)  
+**ROI**: 3763×3079 pixels (~1° × 1° subset at 30m, windowed read)  
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
 **Source**: Google Cloud `gcp-public-data-landsat` (no auth required)
 
 > **Memory note**: Rust holds all 7 bands as f64 arrays simultaneously for parallel AC.
 > Python ACOLITE processes bands sequentially, keeping only one in memory at a time.
-> This is an architectural choice (throughput vs memory) that can be tuned.
+
+---
+
+## Sentinel-2 MSI — Dark Spectrum Fitting
+
+| Metric | Python | Rust | Improvement |
+|--------|--------|------|-------------|
+| **Processing time** | — | — | _in progress_ |
+| **Peak memory** | — | — | _in progress_ |
+
+**Scene**: S2B L1C, SE Australia (Element84 STAC, public S3)  
+**Status**: SAFE directory reconstruction from Element84 needs proper ESA naming.
+The Rust S2 loader expects full ESA product IDs (e.g. `S2B_MSIL1C_20240628T...`).
+
+_Next step: fix SAFE name format or adapt Rust loader for Element84 scene IDs._

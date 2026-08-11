@@ -5,7 +5,7 @@
 [![S2 Benchmark](https://github.com/whatnick/acolite/actions/workflows/s2-benchmark.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/s2-benchmark.yml)
 [![Landsat Benchmark](https://github.com/whatnick/acolite/actions/workflows/landsat-benchmark.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/landsat-benchmark.yml)
 [![S3 OLCI](https://img.shields.io/badge/S3_OLCI-44×_faster-brightgreen)](BENCHMARK_RESULTS.md)
-[![S2 MSI](https://img.shields.io/badge/S2_MSI-pending-yellow)](BENCHMARK_RESULTS.md)
+[![S2 MSI](https://img.shields.io/badge/S2_MSI-in_progress-yellow)](BENCHMARK_RESULTS.md)
 [![Landsat 8/9](https://img.shields.io/badge/Landsat_8/9-9×_faster-brightgreen)](BENCHMARK_RESULTS.md)
 
 ## Executive Summary
