@@ -58,6 +58,14 @@ jobs:
           key: s3-olci-scene-${{ github.run_id }}
           restore-keys: s3-olci-scene-
 
+      - name: Setup EarthData credentials
+        env:
+          EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_p: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: |
+          echo "machine urs.earthdata.nasa.gov login ${EARTHDATA_u} password ${EARTHDATA_p}" > ~/.netrc
+          chmod 600 ~/.netrc
+
       - name: Run E2E test
         env:
           EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}

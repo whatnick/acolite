@@ -1,5 +1,11 @@
 # ACOLITE-RS Roadmap — Updated 2026-08-11
 
+[![Rust CI](https://github.com/whatnick/acolite/actions/workflows/rust.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/rust.yml)
+[![S3 Benchmark](https://github.com/whatnick/acolite/actions/workflows/s3-benchmark.yml/badge.svg?branch=feature/rust-port)](https://github.com/whatnick/acolite/actions/workflows/s3-benchmark.yml)
+[![S3 Speedup](https://img.shields.io/badge/S3_OLCI_Speedup-13×-brightgreen)](BENCHMARK_RESULTS.md)
+[![Rust](https://img.shields.io/badge/Rust-8.8s-blue)](BENCHMARK_RESULTS.md)
+[![Python](https://img.shields.io/badge/Python-111s-orange)](BENCHMARK_RESULTS.md)
+
 ## Executive Summary
 
 ### Current State (as of 2026-08-11)

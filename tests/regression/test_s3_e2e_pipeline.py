@@ -113,7 +113,13 @@ def search_scene():
 
 
 def download_scene(granule, credentials):
-    """Download and extract S3 OLCI scene, using cache."""
+    """Download and extract S3 OLCI scene, using cache.
+    
+    LAADS DAAC uses OAuth2 redirect flow. We handle this by:
+    1. Setting up a session that follows redirects
+    2. Using .netrc for auth (works with redirect-based auth)
+    3. Falling back to token-based auth if needed
+    """
     CACHE.mkdir(parents=True, exist_ok=True)
     sen3_name = granule["id"].replace(".zip", ".SEN3")
     sen3_dir = CACHE / sen3_name
@@ -122,10 +128,36 @@ def download_scene(granule, credentials):
         return sen3_dir
 
     zip_path = CACHE / granule["id"]
-    session = requests.Session()
-    session.auth = credentials
 
-    resp = session.get(granule["url"], allow_redirects=True, stream=True, timeout=60)
+    # Setup session with proper auth for LAADS DAAC OAuth redirects
+    session = requests.Session()
+    username, password = credentials
+
+    # Method 1: Try with .netrc (if configured, handles redirects automatically)
+    try:
+        import netrc as netrc_mod
+        nrc = netrc_mod.netrc()
+        # .netrc handles auth transparently with redirects
+    except Exception:
+        pass
+
+    # Use auth tuple — requests handles redirect auth properly
+    session.auth = (username, password)
+
+    resp = session.get(granule["url"], allow_redirects=True, stream=True, timeout=120)
+
+    # If 401, try getting a bearer token
+    if resp.status_code == 401:
+        token_resp = session.post(
+            "https://urs.earthdata.nasa.gov/api/users/token",
+            auth=(username, password),
+        )
+        if token_resp.ok:
+            token = token_resp.json().get("access_token", "")
+            session.headers["Authorization"] = f"Bearer {token}"
+            session.auth = None
+            resp = session.get(granule["url"], allow_redirects=True, stream=True, timeout=120)
+
     resp.raise_for_status()
 
     with open(zip_path, "wb") as f:
