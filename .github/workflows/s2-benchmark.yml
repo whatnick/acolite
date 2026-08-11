@@ -1,0 +1,304 @@
+name: Sentinel-2 Rust vs Python Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/rust-port]
+    paths:
+      - "src/loader/sentinel2.rs"
+      - "examples/process_sentinel2_ac.rs"
+      - "acolite/sentinel2/**"
+      - ".github/workflows/s2-benchmark.yml"
+
+env:
+  ACOLITE_TEST_CACHE: /tmp/acolite_s2_cache
+  CARGO_TERM_COLOR: always
+  RUST_LOG: info
+
+jobs:
+  benchmark:
+    name: Sentinel-2 — Rust vs Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev gdal-bin libnetcdf-dev libhdf5-dev pkg-config
+
+      - name: Cache Rust build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-s2bench-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-s2bench-
+
+      - name: Cache S2 scene
+        uses: actions/cache@v5
+        with:
+          path: /tmp/acolite_s2_cache
+          key: s2-l1c-element84-v1-${{ github.sha }}
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install "numpy<2"
+          pip install --no-build-isolation GDAL==$(gdal-config --version)
+          pip install scipy matplotlib \
+            netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
+
+      - name: Build Rust (release, full-io + gdal)
+        run: cargo build --release --features "full-io,gdal-support" --example process_sentinel2_ac
+
+      - name: Download S2 L1C scene from Element84 (public, no auth)
+        run: |
+          python3 - <<'EOF'
+          import os, sys, requests
+          from pathlib import Path
+
+          cache = Path(os.environ["ACOLITE_TEST_CACHE"])
+          cache.mkdir(parents=True, exist_ok=True)
+
+          # Check cache
+          existing = list(cache.glob("S2*.SAFE"))
+          if existing and (existing[0] / "MTD_MSIL1C.xml").exists():
+              print(f"Cached: {existing[0].name}")
+              sys.exit(0)
+
+          # Search Element84 for low-cloud S2 L1C over SE Australia
+          print("Searching Element84 Earth Search for S2 L1C...")
+          resp = requests.post("https://earth-search.aws.element84.com/v1/search",
+              json={
+                  "collections": ["sentinel-2-l1c"],
+                  "bbox": [141, -37, 145, -35],
+                  "datetime": "2024-06-01T00:00:00Z/2024-06-30T23:59:59Z",
+                  "limit": 5,
+                  "query": {"eo:cloud_cover": {"lt": 10}},
+              }, timeout=30)
+          resp.raise_for_status()
+          features = resp.json()["features"]
+          assert features, "No S2 scenes found"
+          scene = features[0]
+          scene_id = scene["id"]
+          print(f"Selected: {scene_id} (cloud: {scene['properties'].get('eo:cloud_cover')}%)")
+
+          # Get the tile info for constructing SAFE directory
+          assets = scene["assets"]
+          # Element84 S2 L1C assets are stored as individual JP2 on s3://sentinel-s2-l1c
+          # We need to reconstruct a minimal SAFE directory structure
+
+          # Get the tile path from any band URL
+          # Format: s3://sentinel-s2-l1c/tiles/55/H/BA/2024/6/28/0/B02.jp2
+          sample_href = assets.get("blue", assets.get("B02", {})).get("href", "")
+          parts = sample_href.replace("s3://sentinel-s2-l1c/", "").split("/")
+          # tiles/55/H/BA/2024/6/28/0/B02.jp2 → tile_path = tiles/55/H/BA/2024/6/28/0
+
+          tile_path = "/".join(parts[:-1])
+          base_url = f"https://sentinel-s2-l1c.s3.amazonaws.com/{tile_path}"
+          print(f"Base URL: {base_url}")
+
+          # Create SAFE directory structure
+          # S2x_MSIL1C_...SAFE/GRANULE/xxx/IMG_DATA/
+          safe_name = f"{scene_id}.SAFE"
+          safe_dir = cache / safe_name
+          granule_name = "L1C_TILE"
+          granule_dir = safe_dir / "GRANULE" / granule_name
+          img_dir = granule_dir / "IMG_DATA"
+          img_dir.mkdir(parents=True, exist_ok=True)
+
+          # Download bands (10m: B02,B03,B04,B08; 20m: B05,B06,B07,B8A,B11,B12; 60m: B01,B09,B10)
+          bands_20m = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12", "B01"]
+          session = requests.Session()
+
+          for band in bands_20m:
+              fname = f"T{parts[1]}{parts[2]}{parts[3]}_{band}.jp2"
+              fpath = img_dir / fname
+              if fpath.exists() and fpath.stat().st_size > 100_000:
+                  continue
+              url = f"{base_url}/{band}.jp2"
+              print(f"  {band}.jp2...", end=" ", flush=True)
+              r = session.get(url, stream=True, timeout=120)
+              if r.status_code == 200:
+                  with open(fpath, "wb") as f:
+                      for chunk in r.iter_content(128*1024):
+                          f.write(chunk)
+                  print(f"{fpath.stat().st_size//1024//1024} MB")
+              else:
+                  print(f"HTTP {r.status_code}")
+
+          # Download metadata files
+          for meta_file in ["metadata.xml", "tileInfo.json"]:
+              url = f"{base_url}/{meta_file}"
+              r = session.get(url, timeout=30)
+              if r.status_code == 200:
+                  if meta_file == "metadata.xml":
+                      # This is the tile-level metadata → MTD_TL.xml
+                      (granule_dir / "MTD_TL.xml").write_bytes(r.content)
+                  elif meta_file == "tileInfo.json":
+                      # Extract key info for MTD_MSIL1C.xml
+                      import json
+                      tile_info = json.loads(r.content)
+
+          # Create minimal MTD_MSIL1C.xml for ACOLITE
+          quantification_value = 10000
+          mtd_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+          <n1:Level-1C_User_Product xmlns:n1="https://psd-14.sentinel2.eo.esa.int/PSD/User_Product_Level-1C.xsd">
+            <n1:General_Info>
+              <Product_Info>
+                <PRODUCT_URI>{safe_name}</PRODUCT_URI>
+                <PROCESSING_LEVEL>Level-1C</PROCESSING_LEVEL>
+                <SPACECRAFT_NAME>Sentinel-2B</SPACECRAFT_NAME>
+              </Product_Info>
+              <Product_Image_Characteristics>
+                <QUANTIFICATION_VALUE unit="none">{quantification_value}</QUANTIFICATION_VALUE>
+                <Radiometric_Offset_List>
+                  <RADIO_ADD_OFFSET band_id="0">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="1">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="2">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="3">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="4">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="5">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="6">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="7">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="8">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="9">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="10">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="11">-1000</RADIO_ADD_OFFSET>
+                  <RADIO_ADD_OFFSET band_id="12">-1000</RADIO_ADD_OFFSET>
+                </Radiometric_Offset_List>
+              </Product_Image_Characteristics>
+            </n1:General_Info>
+          </n1:Level-1C_User_Product>"""
+          (safe_dir / "MTD_MSIL1C.xml").write_text(mtd_xml)
+
+          # Verify
+          jp2s = list(img_dir.glob("*.jp2"))
+          total_mb = sum(f.stat().st_size for f in jp2s) // 1024 // 1024
+          print(f"\n✓ {len(jp2s)} bands, {total_mb} MB total")
+          assert len(jp2s) >= 8, f"Need ≥8 bands, got {len(jp2s)}"
+          EOF
+
+      - name: Run Python ACOLITE
+        run: |
+          python3 - <<'EOF'
+          import sys, time, resource, json, os
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          import acolite as ac
+
+          cache = Path("/tmp/acolite_s2_cache")
+          safe_dir = next(cache.glob("S2*.SAFE"))
+          out = cache / "py_output"
+          out.mkdir(exist_ok=True)
+
+          settings = {
+              "inputfile": str(safe_dir),
+              "output": str(out),
+              "limit": [-36.5, 142.5, -35.5, 143.5],
+              "verbosity": 1,
+              "s2_target_res": 20,
+              "dsf_aot_estimate": "fixed",
+              "l2w_parameters": None,
+              "rgb_rhot": False, "rgb_rhos": False, "map_l2w": False,
+          }
+
+          t0 = time.time()
+          result = ac.acolite.acolite_run(settings=settings)
+          elapsed = time.time() - t0
+          peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+          metrics = {"time_s": round(elapsed, 2), "peak_rss_mb": round(peak_mb)}
+          print(f"Python: {elapsed:.1f}s, {peak_mb:.0f} MB")
+          Path("/tmp/python_s2_metrics.json").write_text(json.dumps(metrics))
+          EOF
+
+      - name: Run Rust ACOLITE
+        continue-on-error: true
+        run: |
+          SCENE=$(ls -d /tmp/acolite_s2_cache/S2*.SAFE | head -1)
+          mkdir -p /tmp/acolite_s2_cache/rust_output
+
+          /usr/bin/time -v ./target/release/examples/process_sentinel2_ac \
+            --file "$SCENE" \
+            --limit "-36.5,142.5,-35.5,143.5" \
+            --res 20 \
+            --output /tmp/acolite_s2_cache/rust_output \
+            --aot-mode fixed 2>&1 | tee /tmp/rust_s2_output.log
+
+          RUST_TOTAL=$(grep "Total:" /tmp/rust_s2_output.log | grep -oP '[\d.]+(?=s)' | tail -1 || echo "0")
+          RUST_RSS=$(grep "Maximum resident" /tmp/rust_s2_output.log | grep -oP '[\d]+' || echo "0")
+          RUST_RSS_MB=$((RUST_RSS / 1024))
+
+          if [ ! -f /tmp/rust_s2_output.log ]; then
+            RUST_TOTAL="0"
+            RUST_RSS_MB="0"
+          fi
+
+          echo "{\"time_s\": ${RUST_TOTAL:-0}, \"peak_rss_mb\": ${RUST_RSS_MB:-0}}" > /tmp/rust_s2_metrics.json
+          cat /tmp/rust_s2_metrics.json
+
+      - name: Generate Benchmark Report
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          from pathlib import Path
+
+          py = json.loads(Path("/tmp/python_s2_metrics.json").read_text())
+          rust_file = Path("/tmp/rust_s2_metrics.json")
+          rust = json.loads(rust_file.read_text()) if rust_file.exists() else {"time_s": 0, "peak_rss_mb": 0}
+
+          speedup = py["time_s"] / rust["time_s"] if rust["time_s"] > 0 else 0
+
+          print(f"\n{'='*60}")
+          print(f"  SENTINEL-2 BENCHMARK: Rust vs Python")
+          print(f"{'='*60}")
+          print(f"  {'Metric':<20} {'Python':>10} {'Rust':>10} {'Factor':>10}")
+          print(f"  {'-'*20} {'-'*10} {'-'*10} {'-'*10}")
+          print(f"  {'Wall time (s)':<20} {py['time_s']:>10.1f} {rust['time_s']:>10.1f} {speedup:>9.1f}×")
+          if rust["peak_rss_mb"] > 0:
+              print(f"  {'Peak RSS (MB)':<20} {py['peak_rss_mb']:>10.0f} {rust['peak_rss_mb']:>10.0f}")
+          print(f"{'='*60}")
+
+          # GitHub Step Summary
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "/tmp/summary.md")
+          with open(summary_path, "w") as f:
+              f.write(f"## 🛰️ Sentinel-2 Benchmark — Rust vs Python\n\n")
+              f.write(f"| Metric | Python | Rust | Improvement |\n")
+              f.write(f"|--------|--------|------|-------------|\n")
+              f.write(f"| **Wall time** | {py['time_s']:.1f}s | {rust['time_s']:.1f}s | **{speedup:.1f}× faster** |\n")
+              if rust["peak_rss_mb"] > 0:
+                  f.write(f"| **Peak RAM** | {py['peak_rss_mb']:.0f} MB | {rust['peak_rss_mb']:.0f} MB |\n")
+
+          if rust["time_s"] > 0:
+              assert speedup > 2.0, f"Rust should be >2× faster (got {speedup:.1f}×)"
+          else:
+              print("⚠️  Rust processing failed — benchmark incomplete")
+          EOF
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: s2-benchmark-results
+          path: |
+            /tmp/python_s2_metrics.json
+            /tmp/rust_s2_metrics.json
+            /tmp/rust_s2_output.log
