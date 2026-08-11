@@ -23,12 +23,12 @@
 
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
-| **Processing time** | 63.5s | 28.2s | **2.2× faster** |
-| **Peak memory** | 1419 MB | 12377 MB | -772% reduction |
+| **Processing time** | 45.4s | 6.5s | **7.0× faster** |
+| **Peak memory** | 1424 MB | 2672 MB | -88% reduction |
 
 **Scene**: Landsat 9 Collection 2 Level-1, SE Australia  
 **ROI**: ~1° × 1° subset (~3300 × 3300 pixels at 30m)  
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
 **Source**: USGS LandsatLook STAC (no auth required)
 
-![L8/9 Speedup](https://img.shields.io/badge/Landsat_Speedup-2×-brightgreen)
+![L8/9 Speedup](https://img.shields.io/badge/Landsat_Speedup-7×-brightgreen)
