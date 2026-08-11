@@ -68,132 +68,77 @@ jobs:
       - name: Build Rust (release, full-io + gdal)
         run: cargo build --release --features "full-io,gdal-support" --example process_sentinel2_ac
 
-      - name: Download S2 L1C scene from Element84 (public, no auth)
+      - name: Download S2 L1C scene from ESA CDSE
+        env:
+          CDSE_u: ${{ secrets.CDSE_USERNAME }}
+          CDSE_p: ${{ secrets.CDSE_PASSWORD }}
         run: |
           python3 - <<'EOF'
-          import os, sys, requests
+          import os, sys, requests, zipfile
           from pathlib import Path
 
           cache = Path(os.environ["ACOLITE_TEST_CACHE"])
           cache.mkdir(parents=True, exist_ok=True)
 
           # Check cache
-          existing = list(cache.glob("S2*.SAFE"))
+          existing = list(cache.glob("S2*_MSIL1C_*.SAFE"))
           if existing and (existing[0] / "MTD_MSIL1C.xml").exists():
               print(f"Cached: {existing[0].name}")
               sys.exit(0)
 
-          # Search Element84 for low-cloud S2 L1C over SE Australia
-          print("Searching Element84 Earth Search for S2 L1C...")
-          resp = requests.post("https://earth-search.aws.element84.com/v1/search",
-              json={
-                  "collections": ["sentinel-2-l1c"],
-                  "bbox": [141, -37, 145, -35],
-                  "datetime": "2024-06-01T00:00:00Z/2024-06-30T23:59:59Z",
-                  "limit": 5,
-                  "query": {"eo:cloud_cover": {"lt": 10}},
-              }, timeout=30)
+          # Get CDSE token
+          u = os.environ.get("CDSE_u", "")
+          p = os.environ.get("CDSE_p", "")
+          token_resp = requests.post(
+              "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+              data={"grant_type": "password", "username": u, "password": p, "client_id": "cdse-public"},
+              timeout=30)
+          assert token_resp.ok, f"CDSE token failed: {token_resp.status_code}"
+          token = token_resp.json()["access_token"]
+
+          # Search for a small S2 L1C scene over SE Australia
+          search_url = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
+          params = {
+              "$filter": "Collection/Name eq 'SENTINEL-2' and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI1C') and OData.CSC.Intersects(area=geography'SRID=4326;POLYGON((141 -37,145 -37,145 -35,141 -35,141 -37))') and ContentDate/Start ge 2024-06-01T00:00:00.000Z and ContentDate/Start le 2024-06-30T23:59:59.000Z",
+              "$top": 5,
+              "$orderby": "ContentLength asc",
+          }
+          resp = requests.get(search_url, params=params, timeout=30)
           resp.raise_for_status()
-          features = resp.json()["features"]
-          assert features, "No S2 scenes found"
-          scene = features[0]
-          scene_id = scene["id"]
-          print(f"Selected: {scene_id} (cloud: {scene['properties'].get('eo:cloud_cover')}%)")
+          products = resp.json()["value"]
+          assert products, "No S2 products found"
 
-          # Get the tile info for constructing SAFE directory
-          assets = scene["assets"]
-          # Element84 S2 L1C assets are stored as individual JP2 on s3://sentinel-s2-l1c
-          # We need to reconstruct a minimal SAFE directory structure
+          # Pick smallest scene
+          product = products[0]
+          product_id = product["Id"]
+          product_name = product["Name"]
+          size_mb = product.get("ContentLength", 0) // 1024 // 1024
+          print(f"Selected: {product_name} ({size_mb} MB)")
 
-          # Get the tile path from any band URL
-          # Format: s3://sentinel-s2-l1c/tiles/55/H/BA/2024/6/28/0/B02.jp2
-          sample_href = assets.get("blue", assets.get("B02", {})).get("href", "")
-          parts = sample_href.replace("s3://sentinel-s2-l1c/", "").split("/")
-          # tiles/55/H/BA/2024/6/28/0/B02.jp2 → tile_path = tiles/55/H/BA/2024/6/28/0
-
-          tile_path = "/".join(parts[:-1])
-          base_url = f"https://sentinel-s2-l1c.s3.amazonaws.com/{tile_path}"
-          print(f"Base URL: {base_url}")
-
-          # Create SAFE directory structure
-          # S2x_MSIL1C_...SAFE/GRANULE/xxx/IMG_DATA/
-          safe_name = f"{scene_id}.SAFE"
-          safe_dir = cache / safe_name
-          granule_name = "L1C_TILE"
-          granule_dir = safe_dir / "GRANULE" / granule_name
-          img_dir = granule_dir / "IMG_DATA"
-          img_dir.mkdir(parents=True, exist_ok=True)
-
-          # Download bands (10m: B02,B03,B04,B08; 20m: B05,B06,B07,B8A,B11,B12; 60m: B01,B09,B10)
-          bands_20m = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12", "B01"]
+          # Download
           session = requests.Session()
+          session.headers["Authorization"] = f"Bearer {token}"
+          url = f"https://zipper.dataspace.copernicus.eu/odata/v1/Products({product_id})/$value"
+          print("Downloading...")
+          resp = session.get(url, stream=True, timeout=300)
+          resp.raise_for_status()
 
-          for band in bands_20m:
-              fname = f"T{parts[1]}{parts[2]}{parts[3]}_{band}.jp2"
-              fpath = img_dir / fname
-              if fpath.exists() and fpath.stat().st_size > 100_000:
-                  continue
-              url = f"{base_url}/{band}.jp2"
-              print(f"  {band}.jp2...", end=" ", flush=True)
-              r = session.get(url, stream=True, timeout=120)
-              if r.status_code == 200:
-                  with open(fpath, "wb") as f:
-                      for chunk in r.iter_content(128*1024):
-                          f.write(chunk)
-                  print(f"{fpath.stat().st_size//1024//1024} MB")
-              else:
-                  print(f"HTTP {r.status_code}")
+          zip_path = cache / "scene.zip"
+          downloaded = 0
+          with open(zip_path, "wb") as f:
+              for chunk in resp.iter_content(128*1024):
+                  f.write(chunk)
+                  downloaded += len(chunk)
+          print(f"Downloaded: {downloaded // 1024 // 1024} MB")
 
-          # Download metadata files
-          for meta_file in ["metadata.xml", "tileInfo.json"]:
-              url = f"{base_url}/{meta_file}"
-              r = session.get(url, timeout=30)
-              if r.status_code == 200:
-                  if meta_file == "metadata.xml":
-                      # This is the tile-level metadata → MTD_TL.xml
-                      (granule_dir / "MTD_TL.xml").write_bytes(r.content)
-                  elif meta_file == "tileInfo.json":
-                      # Extract key info for MTD_MSIL1C.xml
-                      import json
-                      tile_info = json.loads(r.content)
+          # Extract
+          with zipfile.ZipFile(zip_path) as zf:
+              zf.extractall(cache)
+          zip_path.unlink()
 
-          # Create minimal MTD_MSIL1C.xml for ACOLITE
-          quantification_value = 10000
-          mtd_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-          <n1:Level-1C_User_Product xmlns:n1="https://psd-14.sentinel2.eo.esa.int/PSD/User_Product_Level-1C.xsd">
-            <n1:General_Info>
-              <Product_Info>
-                <PRODUCT_URI>{safe_name}</PRODUCT_URI>
-                <PROCESSING_LEVEL>Level-1C</PROCESSING_LEVEL>
-                <SPACECRAFT_NAME>Sentinel-2B</SPACECRAFT_NAME>
-              </Product_Info>
-              <Product_Image_Characteristics>
-                <QUANTIFICATION_VALUE unit="none">{quantification_value}</QUANTIFICATION_VALUE>
-                <Radiometric_Offset_List>
-                  <RADIO_ADD_OFFSET band_id="0">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="1">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="2">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="3">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="4">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="5">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="6">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="7">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="8">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="9">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="10">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="11">-1000</RADIO_ADD_OFFSET>
-                  <RADIO_ADD_OFFSET band_id="12">-1000</RADIO_ADD_OFFSET>
-                </Radiometric_Offset_List>
-              </Product_Image_Characteristics>
-            </n1:General_Info>
-          </n1:Level-1C_User_Product>"""
-          (safe_dir / "MTD_MSIL1C.xml").write_text(mtd_xml)
-
-          # Verify
-          jp2s = list(img_dir.glob("*.jp2"))
-          total_mb = sum(f.stat().st_size for f in jp2s) // 1024 // 1024
-          print(f"\n✓ {len(jp2s)} bands, {total_mb} MB total")
-          assert len(jp2s) >= 8, f"Need ≥8 bands, got {len(jp2s)}"
+          safe_dirs = list(cache.glob("S2*_MSIL1C_*.SAFE"))
+          assert safe_dirs, "No SAFE directory after extraction"
+          print(f"Extracted: {safe_dirs[0].name}")
           EOF
 
       - name: Run Python ACOLITE
