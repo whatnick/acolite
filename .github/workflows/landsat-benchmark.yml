@@ -89,7 +89,7 @@ jobs:
 
           # Known Landsat 8 Collection 1 scene on GCS public bucket
           # Path 094 Row 085 = Western Victoria, SE Australia
-          scene_id = "LC08_L1TP_094085_20180205_20180221_01_T1"
+          scene_id = "LC08_L1TP_094085_20130408_20170505_01_T1"
           gcs_base = f"https://storage.googleapis.com/gcp-public-data-landsat/LC08/01/094/085/{scene_id}"
           print(f"Downloading {scene_id} from GCS...")
 
@@ -117,7 +117,7 @@ jobs:
 
           tifs = [t for t in scene_dir.glob("*_B*.TIF") if t.stat().st_size > 1_000_000]
           print(f"OK: {len(tifs)} bands, {sum(t.stat().st_size for t in tifs)//1024//1024} MB")
-          if len(tifs) < 5: print("SKIP: GCS scene not found (data availability varies). Landsat benchmark requires manual data staging."); sys.exit(0)
+          assert len(tifs) >= 5, f"Need >=5 bands, got {len(tifs)}"
           EOF
 
       - name: Run Python ACOLITE
