@@ -23,8 +23,8 @@
 
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
-| **Processing time** | 59.0s | 28.4s | **2.1× faster** |
-| **Peak memory** | 1409 MB | 12495 MB | -787% reduction |
+| **Processing time** | 64.6s | 30.1s | **2.1× faster** |
+| **Peak memory** | 1429 MB | 12393 MB | -767% reduction |
 
 **Scene**: Landsat 9 Collection 2 Level-1, SE Australia  
 **ROI**: ~1° × 1° subset (~3300 × 3300 pixels at 30m)  
