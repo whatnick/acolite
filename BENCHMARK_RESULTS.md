@@ -5,18 +5,18 @@
 
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
-| **Processing time** | 110.0s | 2.5s | **43.7× faster** |
-| **Peak memory** | 2526 MB | 1657 MB | 34% reduction |
+| **Processing time** | 99.8s | 2.5s | **39.9× faster** |
+| **Peak memory** | 2523 MB | 1657 MB | 34% reduction |
 
 **Scene**: S3A OLCI EFR, SE Australia coast  
 **ROI**: 737×828 pixels (≈220 km × 250 km)  
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
 **Runner**: GitHub Actions `ubuntu-latest` (4 cores, 16 GB RAM)
 
-_Last updated: 46452fee on feature/rust-port_
+_Last updated: e14fedd5 on feature/rust-port_
 
 ---
 
-![Speedup](https://img.shields.io/badge/S3_Speedup-44×-brightgreen)
+![Speedup](https://img.shields.io/badge/S3_Speedup-40×-brightgreen)
 ![Rust Time](https://img.shields.io/badge/Rust-2.5s-blue)
-![Python Time](https://img.shields.io/badge/Python-110.0s-orange)
+![Python Time](https://img.shields.io/badge/Python-99.8s-orange)
