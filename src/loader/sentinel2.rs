@@ -88,8 +88,49 @@ pub fn load_sentinel2_scene_limit(
     let metadata = parse_s2_metadata(safe_dir, &granule.path(), sensor_lut)?;
 
     // Load bands, resampling to target resolution
+    // If limit is provided, compute pixel window FIRST from the first band's metadata,
+    // then read only the needed subset from each band.
     let mut bands = Vec::new();
     let mut lut_band_map = Vec::new();
+
+    // Determine pixel window from limit (if provided) using first available band
+    let pixel_window: Option<(usize, usize, usize, usize)> = if let Some(lim) = limit {
+        // Find first band to get geotransform and dimensions
+        let first_band_name = S2_BANDS.iter().find_map(|&(bname, _, _, _, _)| {
+            find_band_jp2(&img_data, bname).map(|_| bname)
+        });
+        if let Some(bname) = first_band_name {
+            let jp2 = find_band_jp2(&img_data, bname).unwrap();
+            let ds = Dataset::open(&jp2)
+                .map_err(|e| AcoliteError::Gdal(format!("Open {}: {}", bname, e)))?;
+            let gt = ds.geo_transform()
+                .map_err(|e| AcoliteError::Gdal(format!("GT {}: {}", bname, e)))?;
+            let (src_w, src_h) = ds.raster_size();
+            let src_res = gt[1].abs();
+            let scale = src_res / target_res as f64;
+            let tgt_w = (src_w as f64 * scale).round() as usize;
+            let tgt_h = (src_h as f64 * scale).round() as usize;
+            let wkt = ds.projection();
+            let wkt_ref = if wkt.is_empty() { None } else { Some(wkt.as_str()) };
+            let tgt_gt_x = gt[0];
+            let tgt_gt_y = gt[3];
+            let tgt_px = target_res as f64;
+            let tgt_py = -(target_res as f64);
+
+            crate::loader::latlon_limit_to_pixel_subset(
+                tgt_gt_x, tgt_px, tgt_gt_y, tgt_py,
+                tgt_h, tgt_w, lim, wkt_ref,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some((r, c, nr, nc)) = pixel_window {
+        log::info!("Windowed read: {}×{} pixels (subset from limit)", nr, nc);
+    }
 
     for &(bname, lut_bn, wl, bw, _native_res) in S2_BANDS {
         // Find JP2 file
@@ -109,30 +150,63 @@ pub fn load_sentinel2_scene_limit(
             .map_err(|e| AcoliteError::Gdal(format!("GT {}: {}", bname, e)))?;
         let (src_w, src_h) = ds.raster_size();
 
-        // Compute target dimensions
+        // Compute target dimensions at requested resolution
         let src_res = gt[1].abs();
         let scale = src_res / target_res as f64;
-        let tgt_w = (src_w as f64 * scale).round() as usize;
-        let tgt_h = (src_h as f64 * scale).round() as usize;
+        let full_tgt_w = (src_w as f64 * scale).round() as usize;
+        let full_tgt_h = (src_h as f64 * scale).round() as usize;
 
         let rb = ds
             .rasterband(1)
             .map_err(|e| AcoliteError::Gdal(format!("Band {}: {}", bname, e)))?;
 
-        let mut data = Array2::<u16>::zeros((tgt_h, tgt_w));
-        rb.read_into_slice(
-            (0, 0),
-            (src_w, src_h),
-            (tgt_w, tgt_h),
-            data.as_slice_mut().ok_or_else(|| {
-                AcoliteError::Processing(format!("Non-contiguous array for {}", bname))
-            })?,
-            None,
-        )
-        .map_err(|e| AcoliteError::Gdal(format!("Read {}: {}", bname, e)))?;
+        // Determine what to read
+        let (data, geotrans) = if let Some((r_min, c_min, nr, nc)) = pixel_window {
+            // Windowed read: compute source window corresponding to target window
+            let src_scale = target_res as f64 / src_res;
+            let src_x_off = (c_min as f64 * src_scale).floor() as isize;
+            let src_y_off = (r_min as f64 * src_scale).floor() as isize;
+            let src_x_size = (nc as f64 * src_scale).ceil() as usize;
+            let src_y_size = (nr as f64 * src_scale).ceil() as usize;
+
+            // Clamp to source dimensions
+            let src_x_size = src_x_size.min(src_w - src_x_off as usize);
+            let src_y_size = src_y_size.min(src_h - src_y_off as usize);
+
+            let buf = rb.read_as::<u16>(
+                (src_x_off, src_y_off),
+                (src_x_size, src_y_size),
+                (nc, nr),
+                None,
+            ).map_err(|e| AcoliteError::Gdal(format!("Read window {}: {}", bname, e)))?;
+
+            let arr = Array2::from_shape_vec((nr, nc), buf.data().to_vec())
+                .map_err(|e| AcoliteError::Processing(format!("Array {}: {}", bname, e)))?;
+
+            let new_gt = GeoTransform::new(
+                gt[0] + c_min as f64 * target_res as f64,
+                target_res as f64,
+                gt[3] + r_min as f64 * (-(target_res as f64)),
+                -(target_res as f64),
+            );
+            (arr, new_gt)
+        } else {
+            // Full read with resampling to target resolution
+            let buf = rb.read_as::<u16>(
+                (0, 0),
+                (src_w, src_h),
+                (full_tgt_w, full_tgt_h),
+                None,
+            ).map_err(|e| AcoliteError::Gdal(format!("Read {}: {}", bname, e)))?;
+
+            let arr = Array2::from_shape_vec((full_tgt_h, full_tgt_w), buf.data().to_vec())
+                .map_err(|e| AcoliteError::Processing(format!("Array {}: {}", bname, e)))?;
+
+            let new_gt = GeoTransform::new(gt[0], target_res as f64, gt[3], -(target_res as f64));
+            (arr, new_gt)
+        };
 
         let proj = Projection::from_wkt(ds.projection());
-        let geotrans = GeoTransform::new(gt[0], target_res as f64, gt[3], -(target_res as f64));
 
         bands.push(BandData::new(
             data,
@@ -147,32 +221,6 @@ pub fn load_sentinel2_scene_limit(
 
     // Parse radiometric calibration from product-level metadata
     let (quant, offsets) = parse_s2_radiometric(safe_dir)?;
-
-    // Apply geographic limit subsetting if requested
-    // Uses shared UTM-aware helper that works for both geographic and projected CRS.
-    if let Some(lim) = limit {
-        if let Some(first) = bands.first() {
-            let gt = &first.geotransform;
-            let (rows, cols) = first.data.dim();
-            let wkt = first.projection.wkt.as_deref();
-            if let Some((r_min, c_min, nr, nc)) = crate::loader::latlon_limit_to_pixel_subset(
-                gt.x_origin, gt.pixel_width, gt.y_origin, gt.pixel_height,
-                rows, cols, lim, wkt,
-            ) {
-                use ndarray::s;
-                for band in &mut bands {
-                    band.data = band.data.slice(s![r_min..r_min+nr, c_min..c_min+nc]).to_owned();
-                    band.geotransform = GeoTransform::new(
-                        band.geotransform.x_origin + c_min as f64 * band.geotransform.pixel_width,
-                        band.geotransform.pixel_width,
-                        band.geotransform.y_origin + r_min as f64 * band.geotransform.pixel_height,
-                        band.geotransform.pixel_height,
-                    );
-                }
-                log::info!("Subset to {}×{} pixels from limit", nr, nc);
-            }
-        }
-    }
 
     Ok(S2Scene {
         bands,

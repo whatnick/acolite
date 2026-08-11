@@ -157,7 +157,7 @@ jobs:
           settings = {
               "inputfile": str(safe_dir),
               "output": str(out),
-              "limit": [-36.5, 142.5, -35.5, 143.5],
+              "limit": [-36.0, 141.4, -35.5, 141.9],
               "verbosity": 1,
               "s2_target_res": 20,
               "dsf_aot_estimate": "fixed",
@@ -183,7 +183,7 @@ jobs:
 
           /usr/bin/time -v ./target/release/examples/process_sentinel2_ac \
             --file "$SCENE" \
-            --limit "-36.5,142.5,-35.5,143.5" \
+            --limit "-36.0,141.4,-35.5,141.9" \
             --res 20 \
             --output /tmp/acolite_s2_cache/rust_output \
             --aot-mode fixed 2>&1 | tee /tmp/rust_s2_output.log
