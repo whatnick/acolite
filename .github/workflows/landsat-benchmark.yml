@@ -69,7 +69,20 @@ jobs:
       - name: Build Rust (release, full-io)
         run: cargo build --release --features "full-io,gdal-support" --example process_landsat
 
+      - name: Setup EarthData credentials
+        env:
+          EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_p: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: |
+          echo "machine urs.earthdata.nasa.gov login ${EARTHDATA_u} password ${EARTHDATA_p}" > ~/.netrc
+          chmod 600 ~/.netrc
+          # Also configure for USGS LandsatLook which redirects to URS
+          echo "machine landsatlook.usgs.gov login ${EARTHDATA_u} password ${EARTHDATA_p}" >> ~/.netrc
+
       - name: Download Landsat scene from USGS STAC
+        env:
+          EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_p: ${{ secrets.EARTHDATA_PASSWORD }}
         run: |
           python3 - <<'EOF'
           import os, sys, requests, json
@@ -111,37 +124,47 @@ jobs:
           scene_id = scene["id"]
           print(f"Selected: {scene_id} (cloud: {scene['properties'].get('eo:cloud_cover')}%)")
 
-          # Download individual band TIFFs + MTL
+          # Download using wget with .netrc (handles USGS OAuth redirects)
           scene_dir = cache / scene_id
           scene_dir.mkdir(exist_ok=True)
           assets = scene["assets"]
 
           # Bands needed for ACOLITE: B1-B7 + MTL + angle files
           needed = ["coastal", "blue", "green", "red", "nir08", "swir16", "swir22",
-                    "MTL.txt", "MTL.json", "ANG.txt", "SZA", "SAA", "VZA", "VAA"]
+                    "MTL.txt", "ANG.txt"]
 
-          session = requests.Session()
           for asset_key in needed:
               if asset_key not in assets:
                   continue
               url = assets[asset_key]["href"]
               fname = url.split("/")[-1]
               fpath = scene_dir / fname
-              if fpath.exists():
+              if fpath.exists() and fpath.stat().st_size > 10000:
                   continue
               print(f"  Downloading {fname}...")
-              resp = session.get(url, stream=True, timeout=120)
-              if resp.status_code != 200:
-                  print(f"    Warning: {resp.status_code} for {asset_key}")
-                  continue
-              with open(fpath, "wb") as f:
-                  for chunk in resp.iter_content(128 * 1024):
-                      f.write(chunk)
+              import subprocess
+              # wget handles .netrc auth + redirect chains properly
+              r = subprocess.run(
+                  ["wget", "--no-verbose", "--no-check-certificate",
+                   "--auth-no-challenge",
+                   f"--user={os.environ.get('EARTHDATA_u', '')}",
+                   f"--password={os.environ.get('EARTHDATA_p', '')}",
+                   "-O", str(fpath), url],
+                  capture_output=True, text=True, timeout=300)
+              if r.returncode != 0:
+                  # Fallback: try with curl and cookies
+                  subprocess.run(
+                      ["curl", "-n", "-L", "-o", str(fpath),
+                       "--netrc-file", os.path.expanduser("~/.netrc"),
+                       url],
+                      capture_output=True, timeout=300)
+              sz = fpath.stat().st_size if fpath.exists() else 0
+              print(f"    → {sz // 1024 // 1024} MB")
 
           print(f"✓ Downloaded {scene_id}")
-          # List what we got
           files = list(scene_dir.glob("*"))
-          print(f"  {len(files)} files, {sum(f.stat().st_size for f in files) // 1024 // 1024} MB total")
+          total = sum(f.stat().st_size for f in files)
+          print(f"  {len(files)} files, {total // 1024 // 1024} MB total")
           EOF
 
       - name: Run Python ACOLITE

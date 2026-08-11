@@ -9,6 +9,8 @@ pub mod sentinel3_l2r;
 pub mod source;
 
 pub use geotiff::read_geotiff_band;
+#[cfg(feature = "gdal-support")]
+pub use geotiff::{read_geotiff_band_gdal, read_geotiff_band_url, read_geotiff_band_window};
 pub use landsat::{load_landsat_bands, load_landsat_scene};
 pub use landsat::load_landsat_scene_limit;
 #[cfg(feature = "netcdf")]
