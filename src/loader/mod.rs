@@ -60,7 +60,40 @@ pub fn latlon_limit_to_pixel_subset(
 
     // Projected CRS (UTM or similar) — infer UTM zone from WKT or raster origin
     let utm_zone = infer_utm_zone_from_wkt(wkt).or_else(|| infer_utm_zone_from_easting(x_origin))?;
-    let is_north = y_origin > 0.0; // northern hemisphere if northing > 0
+
+    // Determine hemisphere: prefer WKT (which explicitly says N or S), fall back to y_origin sign.
+    // Note: Landsat Collection 1 uses UTM xxN convention for southern hemisphere scenes
+    // with negative northing values, so y_origin sign alone is unreliable.
+    let is_north_from_wkt = wkt.and_then(|w| {
+        let lower = w.to_lowercase();
+        if lower.contains("32601") || lower.contains("32660") {
+            return None; // Can't tell from these EPSGs alone
+        }
+        // Check EPSG code: 326xx = North, 327xx = South
+        if let Some(pos) = lower.find("epsg\",") {
+            let rest = &lower[pos + 6..];
+            let epsg_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(epsg) = epsg_str.parse::<u32>() {
+                if (32601..=32660).contains(&epsg) { return Some(true); }
+                if (32701..=32760).contains(&epsg) { return Some(false); }
+            }
+        }
+        // Check for "N" or "S" suffix in zone name
+        if lower.contains("utm zone") {
+            if lower.contains("54n") || lower.contains("55n") || lower.contains("56n") {
+                return Some(true);
+            }
+            if lower.contains("54s") || lower.contains("55s") || lower.contains("56s") {
+                return Some(false);
+            }
+        }
+        None
+    });
+
+    // If WKT says "North" but y_origin is negative, the scene uses N-convention
+    // for southern hemisphere (common in Landsat C1). In this case, we should NOT
+    // add false northing — convert lat/lon to UTM with is_north=true to match.
+    let is_north = is_north_from_wkt.unwrap_or(y_origin > 0.0);
 
     // Convert all four corners of the limit box to UTM
     let corners = [
