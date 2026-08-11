@@ -59,7 +59,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libgdal-dev libnetcdf-dev libhdf5-dev
           pip install "numpy<2" && pip install --no-build-isolation GDAL==$(gdal-config --version)
-          pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
+          pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf python-dateutil
       - uses: actions/download-artifact@v5
         with: { name: rust-binaries, path: rust-binaries }
       - name: Fix permissions
@@ -158,7 +158,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libgdal-dev libnetcdf-dev libhdf5-dev
           pip install "numpy<2" && pip install --no-build-isolation GDAL==$(gdal-config --version)
-          pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
+          pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf python-dateutil
       - uses: actions/download-artifact@v5
         with: { name: rust-binaries, path: rust-binaries }
       - name: Fix permissions
@@ -233,7 +233,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libgdal-dev libnetcdf-dev libhdf5-dev
           pip install "numpy<2" && pip install --no-build-isolation GDAL==$(gdal-config --version)
-          pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
+          pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf python-dateutil
       - uses: actions/download-artifact@v5
         with: { name: rust-binaries, path: rust-binaries }
       - name: Fix permissions
