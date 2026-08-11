@@ -56,8 +56,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /tmp/acolite_landsat_cache
-          key: landsat-c2l1-scene-v3
-          restore-keys: landsat-c2l1-scene-v3
+          key: landsat-c2l1-scene-v4-${{ github.sha }}
 
       - name: Install Python dependencies
         run: |
@@ -146,27 +145,56 @@ jobs:
               url = assets[asset_key]["href"]
               fname = url.split("/")[-1]
               fpath = scene_dir / fname
-              if fpath.exists() and fpath.stat().st_size > 10000:
+              if fpath.exists() and fpath.stat().st_size > 1_000_000:
                   continue
               print(f"  Downloading {fname}...")
+
+              # Use requests with a session that handles EarthData URS redirects
+              # The flow: USGS → redirects to URS login → back to USGS with auth cookie
               import subprocess
-              # wget handles .netrc auth + redirect chains properly
-              r = subprocess.run(
-                  ["wget", "--no-verbose", "--no-check-certificate",
-                   "--auth-no-challenge",
-                   f"--user={os.environ.get('EARTHDATA_u', '')}",
-                   f"--password={os.environ.get('EARTHDATA_p', '')}",
-                   "-O", str(fpath), url],
+              u = os.environ.get("EARTHDATA_u", "")
+              p = os.environ.get("EARTHDATA_p", "")
+
+              # Method: curl with netrc handles redirect-based auth properly
+              result = subprocess.run(
+                  ["curl", "-s", "-L", "-n",
+                   "--netrc-file", os.path.expanduser("~/.netrc"),
+                   "-o", str(fpath),
+                   "-w", "%{http_code}",
+                   url],
                   capture_output=True, text=True, timeout=300)
-              if r.returncode != 0:
-                  # Fallback: try with curl and cookies
-                  subprocess.run(
-                      ["curl", "-n", "-L", "-o", str(fpath),
-                       "--netrc-file", os.path.expanduser("~/.netrc"),
-                       url],
-                      capture_output=True, timeout=300)
+
+              http_code = result.stdout.strip()
               sz = fpath.stat().st_size if fpath.exists() else 0
-              print(f"    → {sz // 1024 // 1024} MB")
+
+              # If curl with netrc failed, try explicit user/pass
+              if sz < 1_000_000 or http_code != "200":
+                  result = subprocess.run(
+                      ["curl", "-s", "-L",
+                       "-u", f"{u}:{p}",
+                       "-o", str(fpath),
+                       "-w", "%{http_code}",
+                       url],
+                      capture_output=True, text=True, timeout=300)
+                  http_code = result.stdout.strip()
+                  sz = fpath.stat().st_size if fpath.exists() else 0
+
+              # If still failed, try wget
+              if sz < 1_000_000:
+                  subprocess.run(
+                      ["wget", "-q", "--no-check-certificate",
+                       f"--user={u}", f"--password={p}",
+                       "-O", str(fpath), url],
+                      capture_output=True, timeout=300)
+                  sz = fpath.stat().st_size if fpath.exists() else 0
+
+              if sz < 1_000_000:
+                  print(f"    ⚠️  Download failed ({sz} bytes, HTTP {http_code})")
+                  # Remove the broken file
+                  if fpath.exists():
+                      fpath.unlink()
+              else:
+                  print(f"    → {sz // 1024 // 1024} MB")
 
           print(f"✓ Downloaded {scene_id}")
           files = list(scene_dir.glob("*"))
@@ -176,6 +204,27 @@ jobs:
 
       - name: Run Python ACOLITE
         run: |
+          # First verify the scene was downloaded correctly
+          python3 -c "
+          from pathlib import Path
+          import sys
+          cache = Path('/tmp/acolite_landsat_cache')
+          scenes = list(cache.glob('LC0*'))
+          if not scenes:
+              print('ERROR: No scene directory found'); sys.exit(1)
+          scene = scenes[0]
+          tifs = list(scene.glob('*_B*.TIF'))
+          print(f'Scene: {scene.name}')
+          print(f'TIF files: {len(tifs)}')
+          for t in sorted(tifs)[:3]:
+              sz = t.stat().st_size
+              print(f'  {t.name}: {sz // 1024 // 1024} MB')
+              if sz < 1_000_000:
+                  print(f'  ERROR: {t.name} is too small ({sz} bytes) - likely HTML error page')
+                  sys.exit(1)
+          print('✓ Scene data verified')
+          "
+
           python3 - <<'EOF'
           import sys, time, resource, json, os
           from pathlib import Path
