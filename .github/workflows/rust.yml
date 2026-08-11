@@ -48,6 +48,12 @@ jobs:
         run: cargo test --lib --verbose
         continue-on-error: ${{ runner.os != 'Linux' }}  # netcdf system libs only on Linux
 
+      - name: Install system libraries (Linux, for full-io)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnetcdf-dev libhdf5-dev pkg-config
+
       - name: Run tests (full-io feature)
         if: runner.os == 'Linux'
         run: cargo test --lib --features full-io --verbose
