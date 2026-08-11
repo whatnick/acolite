@@ -41,13 +41,14 @@ pub fn load_landsat_scene(scene_dir: &Path) -> Result<(Vec<BandData<u16>>, Metad
 }
 
 /// Load Landsat scene with optional geographic limit `[south, west, north, east]`.
+///
+/// When a limit is provided and the `gdal-support` feature is enabled, uses
+/// GDAL windowed reads to only load the pixels within the limit from disk.
+/// This dramatically reduces memory usage for subsetted processing.
 pub fn load_landsat_scene_limit(
     scene_dir: &Path,
     limit: Option<&[f64; 4]>,
 ) -> Result<(Vec<BandData<u16>>, Metadata)> {
-    let band_numbers: Vec<u8> = LANDSAT_BANDS.iter().map(|b| b.0).collect();
-    let mut bands = load_landsat_bands(scene_dir, &band_numbers)?;
-
     let metadata = if let Some(mtl_path) = find_mtl(scene_dir) {
         parse_mtl(&mtl_path).unwrap_or_else(|e| {
             log::warn!("MTL parse failed ({}), using fallback metadata", e);
@@ -58,31 +59,111 @@ pub fn load_landsat_scene_limit(
         fallback_metadata(scene_dir)
     };
 
-    if let Some(lim) = limit {
-        if let Some(first) = bands.first() {
-            let gt = &first.geotransform;
-            let (rows, cols) = first.data.dim();
-            let wkt = first.projection.wkt.as_deref();
-            if let Some((r0, c0, nr, nc)) = crate::loader::latlon_limit_to_pixel_subset(
-                gt.x_origin, gt.pixel_width, gt.y_origin, gt.pixel_height,
-                rows, cols, lim, wkt,
-            ) {
-                for band in &mut bands {
-                    use ndarray::s;
-                    band.data = band.data.slice(s![r0..r0+nr, c0..c0+nc]).to_owned();
-                    band.geotransform = GeoTransform::new(
-                        band.geotransform.x_origin + c0 as f64 * band.geotransform.pixel_width,
-                        band.geotransform.pixel_width,
-                        band.geotransform.y_origin + r0 as f64 * band.geotransform.pixel_height,
-                        band.geotransform.pixel_height,
-                    );
-                }
-                log::info!("Subset to {}×{} pixels from limit", nr, nc);
-            }
-        }
-    }
+    let band_numbers: Vec<u8> = LANDSAT_BANDS.iter().map(|b| b.0).collect();
+
+    // If limit is provided, compute the pixel window FIRST, then read only that window
+    let bands = if let Some(lim) = limit {
+        load_landsat_bands_windowed(scene_dir, &band_numbers, lim)?
+    } else {
+        load_landsat_bands(scene_dir, &band_numbers)?
+    };
 
     Ok((bands, metadata))
+}
+
+/// Load Landsat bands with a geographic limit applied as a windowed read.
+///
+/// Reads only the geotransform from the first band to compute the pixel window,
+/// then reads only the required pixels from each band file.
+fn load_landsat_bands_windowed(
+    scene_dir: &Path,
+    band_numbers: &[u8],
+    limit: &[f64; 4],
+) -> Result<Vec<BandData<u16>>> {
+    // First, determine the pixel window from the first band's metadata
+    let first_band_path = find_band_file(scene_dir, band_numbers[0])?;
+    let (rows, cols, gt, proj, wkt_str) = read_geotiff_metadata(&first_band_path)?;
+
+    let wkt_ref = if wkt_str.is_empty() { None } else { Some(wkt_str.as_str()) };
+
+    let window = crate::loader::latlon_limit_to_pixel_subset(
+        gt.x_origin, gt.pixel_width, gt.y_origin, gt.pixel_height,
+        rows, cols, limit, wkt_ref,
+    );
+
+    match window {
+        Some((r0, c0, nr, nc)) => {
+            log::info!(
+                "Windowed read: {}×{} pixels (from {}×{} full scene, offset [{}, {}])",
+                nr, nc, rows, cols, r0, c0
+            );
+            // Read only the window from each band
+            band_numbers
+                .iter()
+                .map(|&num| {
+                    let path = find_band_file(scene_dir, num)?;
+                    log::info!("Reading band {} (window {}×{}): {:?}", num, nr, nc, path);
+                    let mut band = read_geotiff_band_with_window(&path, (c0, r0, nc, nr))?;
+                    if let Some(&(_, wl, bw)) = LANDSAT_BANDS.iter().find(|(n, _, _)| *n == num) {
+                        band.wavelength = wl;
+                        band.bandwidth = bw;
+                    }
+                    band.name = format!("B{}", num);
+                    Ok(band)
+                })
+                .collect()
+        }
+        None => {
+            log::warn!("Limit {:?} does not intersect scene, loading full extent", limit);
+            load_landsat_bands(scene_dir, band_numbers)
+        }
+    }
+}
+
+/// Read only the geotransform, dimensions, and projection from a GeoTIFF without loading raster data.
+#[cfg(feature = "gdal-support")]
+fn read_geotiff_metadata(path: &Path) -> Result<(usize, usize, GeoTransform, crate::core::Projection, String)> {
+    use gdal::Dataset;
+    let ds = Dataset::open(path)
+        .map_err(|e| AcoliteError::Gdal(format!("Cannot open {:?}: {}", path, e)))?;
+    let (w, h) = ds.raster_size();
+    let gt_raw = ds.geo_transform()
+        .map_err(|e| AcoliteError::Gdal(format!("GeoTransform: {}", e)))?;
+    let wkt = ds.projection();
+    let proj = crate::core::Projection::from_wkt(wkt.clone());
+    let gt = GeoTransform::new(gt_raw[0], gt_raw[1], gt_raw[3], gt_raw[5]);
+    Ok((h as usize, w as usize, gt, proj, wkt))
+}
+
+#[cfg(not(feature = "gdal-support"))]
+fn read_geotiff_metadata(path: &Path) -> Result<(usize, usize, GeoTransform, crate::core::Projection, String)> {
+    // Without GDAL, load the full band to get metadata (fallback)
+    let band = crate::loader::geotiff::read_geotiff_band(path)?;
+    let (rows, cols) = band.data.dim();
+    Ok((rows, cols, band.geotransform, band.projection, String::new()))
+}
+
+/// Read a windowed subset of a GeoTIFF band.
+/// Window is (x_offset, y_offset, x_size, y_size) in pixel coordinates.
+#[cfg(feature = "gdal-support")]
+fn read_geotiff_band_with_window(path: &Path, window: (usize, usize, usize, usize)) -> Result<BandData<u16>> {
+    crate::loader::geotiff::read_geotiff_band_window(&path.to_string_lossy(), window)
+}
+
+#[cfg(not(feature = "gdal-support"))]
+fn read_geotiff_band_with_window(path: &Path, window: (usize, usize, usize, usize)) -> Result<BandData<u16>> {
+    // Without GDAL, load full band then crop (fallback — still uses more memory)
+    let full_band = crate::loader::geotiff::read_geotiff_band(path)?;
+    let (x_off, y_off, x_size, y_size) = window;
+    use ndarray::s;
+    let data = full_band.data.slice(s![y_off..y_off+y_size, x_off..x_off+x_size]).to_owned();
+    let gt = GeoTransform::new(
+        full_band.geotransform.x_origin + x_off as f64 * full_band.geotransform.pixel_width,
+        full_band.geotransform.pixel_width,
+        full_band.geotransform.y_origin + y_off as f64 * full_band.geotransform.pixel_height,
+        full_band.geotransform.pixel_height,
+    );
+    Ok(BandData::new(data, 0.0, 0.0, String::new(), full_band.projection, gt))
 }
 
 /// Load specific Landsat bands by number
