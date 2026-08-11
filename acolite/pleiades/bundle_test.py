@@ -12,6 +12,7 @@
 ##                QV 2022-11-09 changed bundle-FS and MS-FS component parsing
 ##                2026-04-07 (QV) added file directory test, changed logic for tiles with individual meta files
 ##                2026-04-08 (QV) skip individual tile meta files
+##                2026-07-30 (QV) moved up components
 
 def bundle_test(file_, listpan=True):
     import os, sys, fnmatch
@@ -38,9 +39,9 @@ def bundle_test(file_, listpan=True):
         fname_ = fname.upper()
 
         ## bundle metadata
+        components = []
         if any([fnmatch.fnmatch(fname_,mm) for mm in meta_matches]):
             xmldoc = minidom.parse('{}/{}'.format(file,fname))
-            components=[]
             for t in xmldoc.getElementsByTagName('Component'):
                 node = t.getElementsByTagName('COMPONENT_TITLE')
                 if len(node) > 0: title = node[0].firstChild.nodeValue

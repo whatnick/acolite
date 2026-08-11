@@ -323,12 +323,15 @@ def hdsf(ncf, output = None, settings = None):
 
     ## glint correction - should do using libRadtran results
     if setu['dsf_residual_glint_correction']:
-        if setu['dsf_residual_glint_correction_method'] != 'default':
-            print('dsf_residual_glint_correction_method={} not implemented after RAdCor'.format(setu['dsf_residual_glint_correction_method']))
+        if hyper:
+            print('hDSF glint correction not yet implemented for hyperspectral sensors')
         else:
-            print('Running glint correction!')
-            ## run glint correction
-            ret = ac.glint.default(gemo, settings = setu, new_file = False, write = True)
+            if setu['dsf_residual_glint_correction_method'] != 'default':
+                print('dsf_residual_glint_correction_method={} not implemented after RAdCor'.format(setu['dsf_residual_glint_correction_method']))
+            else:
+                print('Running glint correction!')
+                ## run glint correction
+                ret = ac.glint.default(gemo, settings = setu, new_file = False, write = True)
 
     ## close files
     gem, gemo = None, None

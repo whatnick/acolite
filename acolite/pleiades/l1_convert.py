@@ -17,6 +17,7 @@
 ##                2025-09-15 (QV) fixed processing of Airbus "REFLECTANCE" data
 ##                                updated data reading and added half pixel to nc_projection
 ##                2026-04-07 (QV) changed tile data test
+##                2026-07-30 (QV) skip tile if missing
 
 def l1_convert(inputfile, output = None, settings = None):
 
@@ -334,6 +335,9 @@ def l1_convert(inputfile, output = None, settings = None):
                             if '_RGB_' in tbn: ifile=ifiles[it]
                         else:
                             ifile=ifiles[it]
+
+                    ## this can happen if a tile is missing
+                    if ifile is None: continue
 
                     dct = None
                     nc_projection = None
