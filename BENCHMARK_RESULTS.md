@@ -26,15 +26,15 @@
 
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
-| **Processing time** | ~90s (est.) | 21s | **~4× faster** (local) |
-| **Peak memory** | — | ~3 GB | — |
+| **Processing time** | ~90s (est.) | 3.3s (subset) | **~27× faster** (local) |
+| **Peak memory** | — | ~1 GB | — |
 
 **Scene**: S2A_MSIL1C_20240629T003711, tile T54HWF (143 MB)  
-**ROI**: 5490×5490 pixels (full tile at 20m, 13 bands)  
+**ROI**: 2791×2281 pixels (0.5° × 0.5° subset at 20m, windowed read)  
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
 **Source**: ESA Copernicus Data Space Ecosystem (CDSE)
 
-_CI results pending — workflow running with CDSE download._
+_CI verification in progress._
 
 ---
 
@@ -42,12 +42,13 @@ _CI results pending — workflow running with CDSE download._
 
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
-| **Processing time** | 65.7s | 7.1s | **9.3× faster** |
-| **Peak memory** | 1427 MB | 2661 MB | -86% reduction |
+| **Processing time** | 62s | 7s | **9× faster** |
+| **Peak memory** | 1414 MB | 2672 MB | 89% more (parallel bands) |
 
-**Scene**: Landsat 9 Collection 2 Level-1, SE Australia  
-**ROI**: ~1° × 1° subset (~3300 × 3300 pixels at 30m)  
+**Scene**: LC08_L1TP_094085_20130408, SE Australia (Collection 1, GCS public)  
+**ROI**: 3763×3079 pixels (~1° × 1° subset at 30m, windowed read)  
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
-**Source**: USGS LandsatLook STAC (no auth required)
+**Source**: Google Cloud `gcp-public-data-landsat` (no auth required)
 
-![L8/9 Speedup](https://img.shields.io/badge/Landsat_Speedup-9×-brightgreen)
+> **Memory note**: Rust holds all bands as f64 arrays simultaneously for parallel AC.
+> Python ACOLITE processes bands sequentially. This is throughput vs memory tradeoff.
