@@ -68,7 +68,7 @@ jobs:
       - name: Build Rust (release, full-io)
         run: cargo build --release --features "full-io,gdal-support" --example process_landsat
 
-      - name: Download Landsat scene from Google Cloud (public, no auth)
+      - name: Download Landsat 8 scene from Google Cloud (public, no auth)
         run: |
           python3 - <<'EOF'
           import os, sys, requests
@@ -77,74 +77,47 @@ jobs:
           cache = Path(os.environ["ACOLITE_TEST_CACHE"])
           cache.mkdir(parents=True, exist_ok=True)
 
-          # Check for cached scene (validate band file > 1MB)
-          existing = list(cache.glob("LC0*"))
+          # Check cache
+          existing = list(cache.glob("LC08*"))
           if existing:
-              b1_files = list(existing[0].glob("*_B1.TIF"))
-              if b1_files and b1_files[0].stat().st_size > 1_000_000:
-                  print(f"✓ Cached: {existing[0].name}")
+              b1 = list(existing[0].glob("*_B1.TIF"))
+              if b1 and b1[0].stat().st_size > 1_000_000:
+                  print(f"Cached: {existing[0].name}")
                   sys.exit(0)
               import shutil
               shutil.rmtree(existing[0])
-              print("Removed corrupted cache")
 
-          # Search USGS STAC for a scene ID (metadata only, no download from USGS)
-          print("Searching USGS LandsatLook STAC for scene ID...")
-          resp = requests.post("https://landsatlook.usgs.gov/stac-server/search",
-              json={
-                  "collections": ["landsat-c2l1"],
-                  "bbox": [141, -36, 145, -34],
-                  "datetime": "2024-01-01T00:00:00Z/2024-12-31T23:59:59Z",
-                  "limit": 5,
-                  "query": {"eo:cloud_cover": {"lt": 20}},
-              }, timeout=30)
-          resp.raise_for_status()
-          features = resp.json()["features"]
-          # Pick L1TP scene
-          scene = next((f for f in features if "_L1TP_" in f["id"]), features[0])
-          scene_id = scene["id"]
-          print(f"Selected: {scene_id}")
-
-          # Parse path/row from scene ID (e.g. LC09_L1TP_094085_...)
-          parts = scene_id.split("_")
-          sensor_code = parts[0]
-          path_row = parts[2]
-          wrs_path = path_row[:3]
-          wrs_row = path_row[3:]
-
-          # Download from Google Cloud public bucket (no auth needed!)
-          # gs://gcp-public-data-landsat/LC09/01/094/085/SCENE_ID/
-          gcs_base = f"https://storage.googleapis.com/gcp-public-data-landsat/{sensor_code}/01/{wrs_path}/{wrs_row}/{scene_id}"
-          print(f"GCS: {gcs_base}")
+          # Known Landsat 8 Collection 1 scene on GCS public bucket
+          # Path 094 Row 085 = Western Victoria, SE Australia
+          scene_id = "LC08_L1TP_094085_20180205_20180221_01_T1"
+          gcs_base = f"https://storage.googleapis.com/gcp-public-data-landsat/LC08/01/094/085/{scene_id}"
+          print(f"Downloading {scene_id} from GCS...")
 
           scene_dir = cache / scene_id
           scene_dir.mkdir(exist_ok=True)
 
-          # Download B1-B7 + MTL + ANG
-          files_to_get = [f"{scene_id}_B{b}.TIF" for b in range(1, 8)]
-          files_to_get += [f"{scene_id}_MTL.txt", f"{scene_id}_ANG.txt"]
+          files = [f"{scene_id}_B{b}.TIF" for b in range(1, 8)]
+          files += [f"{scene_id}_MTL.txt", f"{scene_id}_ANG.txt"]
 
           session = requests.Session()
-          for fname in files_to_get:
+          for fname in files:
               fpath = scene_dir / fname
               if fpath.exists() and fpath.stat().st_size > 1000:
                   continue
               url = f"{gcs_base}/{fname}"
               print(f"  {fname}...", end=" ", flush=True)
-              resp = session.get(url, stream=True, timeout=120)
-              if resp.status_code == 200:
+              r = session.get(url, stream=True, timeout=120)
+              if r.status_code == 200:
                   with open(fpath, "wb") as f:
-                      for chunk in resp.iter_content(128 * 1024):
+                      for chunk in r.iter_content(128*1024):
                           f.write(chunk)
-                  print(f"{fpath.stat().st_size // 1024 // 1024} MB")
+                  print(f"{fpath.stat().st_size//1024//1024} MB")
               else:
-                  print(f"HTTP {resp.status_code}")
+                  print(f"HTTP {r.status_code}")
 
-          # Verify
-          tifs = [f for f in scene_dir.glob("*_B*.TIF") if f.stat().st_size > 1_000_000]
-          total_mb = sum(f.stat().st_size for f in tifs) // 1024 // 1024
-          print(f"\n✓ {len(tifs)} bands downloaded ({total_mb} MB)")
-          assert len(tifs) >= 5, f"Need ≥5 bands, got {len(tifs)}"
+          tifs = [t for t in scene_dir.glob("*_B*.TIF") if t.stat().st_size > 1_000_000]
+          print(f"OK: {len(tifs)} bands, {sum(t.stat().st_size for t in tifs)//1024//1024} MB")
+          assert len(tifs) >= 5
           EOF
 
       - name: Run Python ACOLITE
@@ -177,7 +150,7 @@ jobs:
           import acolite as ac
 
           cache = Path("/tmp/acolite_landsat_cache")
-          scene_dir = next(cache.glob("LC0*"))
+          scene_dir = next(cache.glob("LC08*"))
           out = cache / "py_output"
           out.mkdir(exist_ok=True)
 
