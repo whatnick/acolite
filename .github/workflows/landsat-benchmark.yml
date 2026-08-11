@@ -1,0 +1,306 @@
+name: Landsat 8/9 Rust vs Python Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/rust-port]
+    paths:
+      - "src/**"
+      - "examples/process_landsat.rs"
+      - "acolite/landsat/**"
+      - "acolite/ac/**"
+      - ".github/workflows/landsat-benchmark.yml"
+
+env:
+  ACOLITE_TEST_CACHE: /tmp/acolite_landsat_cache
+  CARGO_TERM_COLOR: always
+  RUST_LOG: info
+
+jobs:
+  benchmark:
+    name: Landsat 8/9 — Rust vs Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev gdal-bin libnetcdf-dev libhdf5-dev pkg-config
+
+      - name: Cache Rust build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-landsat-bench-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-landsat-bench-
+
+      - name: Cache Landsat scene
+        uses: actions/cache@v5
+        with:
+          path: /tmp/acolite_landsat_cache
+          key: landsat-c2l1-scene-v1
+          restore-keys: landsat-c2l1-scene-
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install "numpy<2" scipy matplotlib \
+            GDAL==$(gdal-config --version) \
+            netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
+
+      - name: Build Rust (release, full-io)
+        run: cargo build --release --features full-io --example process_landsat
+
+      - name: Download Landsat scene from USGS STAC
+        run: |
+          python3 - <<'EOF'
+          import os, sys, requests, json
+          from pathlib import Path
+
+          cache = Path(os.environ["ACOLITE_TEST_CACHE"])
+          cache.mkdir(parents=True, exist_ok=True)
+
+          # Check for cached scene
+          existing = list(cache.glob("LC0*"))
+          if existing and any(existing[0].glob("*_B1.TIF")):
+              print(f"✓ Cached: {existing[0].name}")
+              sys.exit(0)
+
+          # Search USGS STAC for a low-cloud Landsat 8/9 scene over SE Australia
+          print("Searching USGS LandsatLook STAC...")
+          resp = requests.post("https://landsatlook.usgs.gov/stac-server/search",
+              json={
+                  "collections": ["landsat-c2l1"],
+                  "bbox": [141, -36, 145, -34],
+                  "datetime": "2026-01-01T00:00:00Z/2026-12-31T23:59:59Z",
+                  "limit": 5,
+                  "query": {"eo:cloud_cover": {"lt": 20}},
+                  "sortby": [{"field": "properties.datetime", "direction": "desc"}],
+              }, timeout=30)
+          resp.raise_for_status()
+          features = resp.json()["features"]
+          assert features, "No Landsat scenes found"
+
+          # Pick first T1 (precision terrain) scene
+          scene = None
+          for f in features:
+              if "_L1TP_" in f["id"]:
+                  scene = f
+                  break
+          if not scene:
+              scene = features[0]
+
+          scene_id = scene["id"]
+          print(f"Selected: {scene_id} (cloud: {scene['properties'].get('eo:cloud_cover')}%)")
+
+          # Download individual band TIFFs + MTL
+          scene_dir = cache / scene_id
+          scene_dir.mkdir(exist_ok=True)
+          assets = scene["assets"]
+
+          # Bands needed for ACOLITE: B1-B7 + MTL + angle files
+          needed = ["coastal", "blue", "green", "red", "nir08", "swir16", "swir22",
+                    "MTL.txt", "MTL.json", "ANG.txt", "SZA", "SAA", "VZA", "VAA"]
+
+          session = requests.Session()
+          for asset_key in needed:
+              if asset_key not in assets:
+                  continue
+              url = assets[asset_key]["href"]
+              fname = url.split("/")[-1]
+              fpath = scene_dir / fname
+              if fpath.exists():
+                  continue
+              print(f"  Downloading {fname}...")
+              resp = session.get(url, stream=True, timeout=120)
+              if resp.status_code != 200:
+                  print(f"    Warning: {resp.status_code} for {asset_key}")
+                  continue
+              with open(fpath, "wb") as f:
+                  for chunk in resp.iter_content(128 * 1024):
+                      f.write(chunk)
+
+          print(f"✓ Downloaded {scene_id}")
+          # List what we got
+          files = list(scene_dir.glob("*"))
+          print(f"  {len(files)} files, {sum(f.stat().st_size for f in files) // 1024 // 1024} MB total")
+          EOF
+
+      - name: Run Python ACOLITE
+        run: |
+          python3 - <<'EOF'
+          import sys, time, resource, json, os
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          import acolite as ac
+
+          cache = Path("/tmp/acolite_landsat_cache")
+          scene_dir = next(cache.glob("LC0*"))
+          out = cache / "py_output"
+          out.mkdir(exist_ok=True)
+
+          # Use a limit to keep processing time reasonable
+          # SE Australia coastal area (Portland, Victoria)
+          settings = {
+              "inputfile": str(scene_dir),
+              "output": str(out),
+              "limit": [-35.5, 141.5, -34.5, 142.5],
+              "verbosity": 1,
+              "dsf_aot_estimate": "fixed",
+              "l2w_parameters": None,
+              "rgb_rhot": False, "rgb_rhos": False, "map_l2w": False,
+          }
+
+          t0 = time.time()
+          result = ac.acolite.acolite_run(settings=settings)
+          elapsed = time.time() - t0
+          peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+          metrics = {"time_s": round(elapsed, 2), "peak_rss_mb": round(peak_mb)}
+          print(f"Python: {elapsed:.1f}s, {peak_mb:.0f} MB")
+          Path("/tmp/python_landsat_metrics.json").write_text(json.dumps(metrics))
+          EOF
+
+      - name: Run Rust ACOLITE
+        run: |
+          SCENE=$(ls -d /tmp/acolite_landsat_cache/LC0* | head -1)
+          mkdir -p /tmp/acolite_landsat_cache/rust_output
+
+          /usr/bin/time -v ./target/release/examples/process_landsat \
+            --file "$SCENE" \
+            --limit "-35.5,141.5,-34.5,142.5" \
+            --output /tmp/acolite_landsat_cache/rust_output \
+            --aot-mode fixed 2>&1 | tee /tmp/rust_landsat_output.log
+
+          # Parse timing from output
+          RUST_TOTAL=$(grep "Total:" /tmp/rust_landsat_output.log | grep -oP '[\d.]+(?=s)' | tail -1 || echo "0")
+          RUST_RSS=$(grep "Maximum resident" /tmp/rust_landsat_output.log | grep -oP '[\d]+' || echo "0")
+          RUST_RSS_MB=$((RUST_RSS / 1024))
+
+          # Fallback: use /usr/bin/time wall clock if parsing fails
+          if [ "$RUST_TOTAL" = "0" ]; then
+            RUST_TOTAL=$(grep "wall clock" /tmp/rust_landsat_output.log | grep -oP '[\d:]+\.[\d]+' | head -1 || echo "0")
+          fi
+
+          echo "{\"time_s\": ${RUST_TOTAL:-0}, \"peak_rss_mb\": ${RUST_RSS_MB:-0}}" > /tmp/rust_landsat_metrics.json
+          cat /tmp/rust_landsat_metrics.json
+
+      - name: Generate Benchmark Report
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          from pathlib import Path
+
+          py = json.loads(Path("/tmp/python_landsat_metrics.json").read_text())
+          rust = json.loads(Path("/tmp/rust_landsat_metrics.json").read_text())
+
+          speedup = py["time_s"] / rust["time_s"] if rust["time_s"] > 0 else 0
+          mem_saving = (1 - rust["peak_rss_mb"] / py["peak_rss_mb"]) * 100 if py["peak_rss_mb"] > 0 else 0
+
+          print(f"\n{'='*60}")
+          print(f"  LANDSAT 8/9 BENCHMARK: Rust vs Python")
+          print(f"{'='*60}")
+          print(f"  {'Metric':<20} {'Python':>10} {'Rust':>10} {'Factor':>10}")
+          print(f"  {'-'*20} {'-'*10} {'-'*10} {'-'*10}")
+          print(f"  {'Wall time (s)':<20} {py['time_s']:>10.1f} {rust['time_s']:>10.1f} {speedup:>9.1f}×")
+          print(f"  {'Peak RSS (MB)':<20} {py['peak_rss_mb']:>10.0f} {rust['peak_rss_mb']:>10.0f} {mem_saving:>8.0f}% less")
+          print(f"{'='*60}")
+
+          # GitHub Step Summary
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "/tmp/summary.md")
+          with open(summary_path, "w") as f:
+              f.write(f"## 🛰️ Landsat 8/9 Benchmark — Rust vs Python\n\n")
+              f.write(f"| Metric | Python | Rust | Improvement |\n")
+              f.write(f"|--------|--------|------|-------------|\n")
+              f.write(f"| **Wall time** | {py['time_s']:.1f}s | {rust['time_s']:.1f}s | **{speedup:.1f}× faster** |\n")
+              f.write(f"| **Peak RAM** | {py['peak_rss_mb']:.0f} MB | {rust['peak_rss_mb']:.0f} MB | {mem_saving:.0f}% less |\n")
+              f.write(f"\n_Scene: Landsat 9 C2L1, SE Australia, subsettted to 1°×1°, DSF fixed AOT_\n")
+
+          # Update BENCHMARK_RESULTS.md with Landsat section
+          results_file = Path("BENCHMARK_RESULTS.md")
+          existing = results_file.read_text() if results_file.exists() else ""
+
+          landsat_section = f"""
+          ## Landsat 8/9 — Dark Spectrum Fitting
+
+          | Metric | Python | Rust | Improvement |
+          |--------|--------|------|-------------|
+          | **Processing time** | {py['time_s']:.1f}s | {rust['time_s']:.1f}s | **{speedup:.1f}× faster** |
+          | **Peak memory** | {py['peak_rss_mb']:.0f} MB | {rust['peak_rss_mb']:.0f} MB | {mem_saving:.0f}% reduction |
+
+          **Scene**: Landsat 9 Collection 2 Level-1, SE Australia  
+          **ROI**: ~1° × 1° subset (~3300 × 3300 pixels at 30m)  
+          **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
+          **Source**: USGS LandsatLook STAC (no auth required)
+
+          ![L8/9 Speedup](https://img.shields.io/badge/Landsat_Speedup-{speedup:.0f}×-brightgreen)
+          """
+
+          # Append or replace Landsat section
+          marker = "## Landsat 8/9"
+          if marker in existing:
+              # Replace existing section
+              parts = existing.split(marker)
+              # Find end of landsat section (next ## or end)
+              rest = parts[1]
+              next_section = rest.find("\n## ")
+              if next_section > 0:
+                  after = rest[next_section:]
+              else:
+                  after = ""
+              new_content = parts[0] + landsat_section.strip() + "\n" + after
+          else:
+              new_content = existing.rstrip() + "\n\n" + landsat_section.strip() + "\n"
+
+          results_file.write_text(new_content)
+
+          # Update badge JSON
+          badge = {
+              "schemaVersion": 1,
+              "label": "Landsat Speedup",
+              "message": f"{speedup:.0f}×",
+              "color": "brightgreen" if speedup >= 5 else "yellow" if speedup >= 2 else "red",
+          }
+          Path("/tmp/landsat-benchmark-badge.json").write_text(json.dumps(badge, indent=2))
+
+          # Assert performance
+          assert speedup > 2.0, f"Rust should be >2× faster (got {speedup:.1f}×)"
+          EOF
+
+      - name: Commit benchmark results
+        if: success() && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add BENCHMARK_RESULTS.md
+          git diff --cached --quiet || git commit -m "ci: update Landsat benchmark results [skip ci]"
+          git push || true
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: landsat-benchmark-results
+          path: |
+            /tmp/python_landsat_metrics.json
+            /tmp/rust_landsat_metrics.json
+            /tmp/rust_landsat_output.log
+            /tmp/landsat-benchmark-badge.json

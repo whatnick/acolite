@@ -20,3 +20,19 @@ _Last updated: 46452fee on feature/rust-port_
 ![Speedup](https://img.shields.io/badge/S3_Speedup-44×-brightgreen)
 ![Rust Time](https://img.shields.io/badge/Rust-2.5s-blue)
 ![Python Time](https://img.shields.io/badge/Python-110.0s-orange)
+
+## Landsat 8/9 — Dark Spectrum Fitting
+
+| Metric | Python | Rust | Improvement |
+|--------|--------|------|-------------|
+| **Processing time** | _pending_ | _pending_ | **~7× faster** (estimated) |
+| **Peak memory** | _pending_ | _pending_ | _pending_ |
+
+**Scene**: Landsat 9 Collection 2 Level-1, SE Australia  
+**ROI**: ~1° × 1° subset (~3300 × 3300 pixels at 30m)  
+**Algorithm**: DSF atmospheric correction, fixed AOT estimation  
+**Source**: USGS LandsatLook STAC (no auth required)
+
+![Landsat Speedup](https://img.shields.io/badge/Landsat_Speedup-pending-yellow)
+
+_Will be auto-updated on first CI run._
