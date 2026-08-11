@@ -25,10 +25,10 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -38,7 +38,7 @@ jobs:
           sudo apt-get install -y libgdal-dev gdal-bin libnetcdf-dev libhdf5-dev
 
       - name: Cache pip packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-s3-e2e-${{ hashFiles('environment.yml') }}
@@ -52,7 +52,7 @@ jobs:
             pytest pytest-timeout
 
       - name: Cache S3 scene download
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/acolite_s3_cache
           key: s3-olci-scene-${{ github.run_id }}
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: s3-e2e-results
           path: |
