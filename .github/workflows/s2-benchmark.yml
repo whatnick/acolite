@@ -99,7 +99,7 @@ jobs:
           # Search for a small S2 L1C scene over SE Australia
           search_url = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
           params = {
-              "$filter": "Collection/Name eq 'SENTINEL-2' and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI1C') and contains(Name,'T54HWF') and ContentDate/Start ge 2024-06-01T00:00:00.000Z and ContentDate/Start le 2024-06-30T23:59:59.000Z",
+              "$filter": "Collection/Name eq 'SENTINEL-2' and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI1C') and contains(Name,'T54HWF') and ContentDate/Start ge 2024-01-01T00:00:00.000Z and ContentDate/Start le 2024-02-28T23:59:59.000Z",
               "$top": 5,
               "$orderby": "ContentDate/Start desc",
           }
@@ -157,7 +157,7 @@ jobs:
           settings = {
               "inputfile": str(safe_dir),
               "output": str(out),
-              "limit": [-36.0, 141.4, -35.5, 141.9],
+              
               "verbosity": 1,
               "s2_target_res": 20,
               "dsf_aot_estimate": "fixed",
@@ -183,7 +183,7 @@ jobs:
 
           /usr/bin/time -v ./target/release/examples/process_sentinel2_ac \
             --file "$SCENE" \
-            --limit "-36.0,141.4,-35.5,141.9" \
+             \
             --res 20 \
             --output /tmp/acolite_s2_cache/rust_output \
             --aot-mode fixed 2>&1 | tee /tmp/rust_s2_output.log
