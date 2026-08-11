@@ -68,119 +68,83 @@ jobs:
       - name: Build Rust (release, full-io)
         run: cargo build --release --features "full-io,gdal-support" --example process_landsat
 
-      - name: Setup EarthData credentials
-        env:
-          EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
-          EARTHDATA_p: ${{ secrets.EARTHDATA_PASSWORD }}
-        run: |
-          echo "machine urs.earthdata.nasa.gov login ${EARTHDATA_u} password ${EARTHDATA_p}" > ~/.netrc
-          chmod 600 ~/.netrc
-          # Also configure for USGS LandsatLook which redirects to URS
-          echo "machine landsatlook.usgs.gov login ${EARTHDATA_u} password ${EARTHDATA_p}" >> ~/.netrc
-
-      - name: Download Landsat scene from USGS STAC
-        env:
-          EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
-          EARTHDATA_p: ${{ secrets.EARTHDATA_PASSWORD }}
+      - name: Download Landsat scene from Google Cloud (public, no auth)
         run: |
           python3 - <<'EOF'
-          import os, sys, requests, json
+          import os, sys, requests
           from pathlib import Path
 
           cache = Path(os.environ["ACOLITE_TEST_CACHE"])
           cache.mkdir(parents=True, exist_ok=True)
 
-          # Check for cached scene (validate file size > 1MB to catch broken downloads)
+          # Check for cached scene (validate band file > 1MB)
           existing = list(cache.glob("LC0*"))
           if existing:
               b1_files = list(existing[0].glob("*_B1.TIF"))
               if b1_files and b1_files[0].stat().st_size > 1_000_000:
                   print(f"✓ Cached: {existing[0].name}")
                   sys.exit(0)
-              else:
-                  # Remove corrupted cache
-                  import shutil
-                  shutil.rmtree(existing[0])
-                  print(f"Removed corrupted cache: {existing[0].name}")
+              import shutil
+              shutil.rmtree(existing[0])
+              print("Removed corrupted cache")
 
-          # Search USGS STAC for a low-cloud Landsat 8/9 scene over SE Australia
-          print("Searching USGS LandsatLook STAC...")
+          # Search USGS STAC for a scene ID (metadata only, no download from USGS)
+          print("Searching USGS LandsatLook STAC for scene ID...")
           resp = requests.post("https://landsatlook.usgs.gov/stac-server/search",
               json={
                   "collections": ["landsat-c2l1"],
                   "bbox": [141, -36, 145, -34],
-                  "datetime": "2026-01-01T00:00:00Z/2026-12-31T23:59:59Z",
+                  "datetime": "2024-01-01T00:00:00Z/2024-12-31T23:59:59Z",
                   "limit": 5,
                   "query": {"eo:cloud_cover": {"lt": 20}},
-                  "sortby": [{"field": "properties.datetime", "direction": "desc"}],
               }, timeout=30)
           resp.raise_for_status()
           features = resp.json()["features"]
-          assert features, "No Landsat scenes found"
-
-          # Pick first T1 (precision terrain) scene
-          scene = None
-          for f in features:
-              if "_L1TP_" in f["id"]:
-                  scene = f
-                  break
-          if not scene:
-              scene = features[0]
-
+          # Pick L1TP scene
+          scene = next((f for f in features if "_L1TP_" in f["id"]), features[0])
           scene_id = scene["id"]
-          print(f"Selected: {scene_id} (cloud: {scene['properties'].get('eo:cloud_cover')}%)")
+          print(f"Selected: {scene_id}")
 
-          # Download using wget with .netrc (handles USGS OAuth redirects)
+          # Parse path/row from scene ID (e.g. LC09_L1TP_094085_...)
+          parts = scene_id.split("_")
+          sensor_code = parts[0]
+          path_row = parts[2]
+          wrs_path = path_row[:3]
+          wrs_row = path_row[3:]
+
+          # Download from Google Cloud public bucket (no auth needed!)
+          # gs://gcp-public-data-landsat/LC09/01/094/085/SCENE_ID/
+          gcs_base = f"https://storage.googleapis.com/gcp-public-data-landsat/{sensor_code}/01/{wrs_path}/{wrs_row}/{scene_id}"
+          print(f"GCS: {gcs_base}")
+
           scene_dir = cache / scene_id
           scene_dir.mkdir(exist_ok=True)
-          assets = scene["assets"]
 
-          # Bands needed for ACOLITE: B1-B7 + MTL + angle files
-          needed = ["coastal", "blue", "green", "red", "nir08", "swir16", "swir22",
-                    "MTL.txt", "ANG.txt"]
+          # Download B1-B7 + MTL + ANG
+          files_to_get = [f"{scene_id}_B{b}.TIF" for b in range(1, 8)]
+          files_to_get += [f"{scene_id}_MTL.txt", f"{scene_id}_ANG.txt"]
 
-          for asset_key in needed:
-              if asset_key not in assets:
-                  continue
-              url = assets[asset_key]["href"]
-              fname = url.split("/")[-1]
+          session = requests.Session()
+          for fname in files_to_get:
               fpath = scene_dir / fname
-              if fpath.exists() and fpath.stat().st_size > 1_000_000:
+              if fpath.exists() and fpath.stat().st_size > 1000:
                   continue
-              print(f"  Downloading {fname}...")
-
-              # Get EarthData bearer token (works with USGS redirect flow)
-              u = os.environ.get("EARTHDATA_u", "")
-              p = os.environ.get("EARTHDATA_p", "")
-
-              session = requests.Session()
-              # Get bearer token from EarthData
-              token_resp = session.post(
-                  "https://urs.earthdata.nasa.gov/api/users/token",
-                  auth=(u, p), timeout=30)
-              if token_resp.ok:
-                  token = token_resp.json().get("access_token", "")
-                  session.headers["Authorization"] = f"Bearer {token}"
-
-              # Download with token (handles redirects)
-              resp = session.get(url, allow_redirects=True, stream=True, timeout=300)
+              url = f"{gcs_base}/{fname}"
+              print(f"  {fname}...", end=" ", flush=True)
+              resp = session.get(url, stream=True, timeout=120)
               if resp.status_code == 200:
                   with open(fpath, "wb") as f:
                       for chunk in resp.iter_content(128 * 1024):
                           f.write(chunk)
-              sz = fpath.stat().st_size if fpath.exists() else 0
-
-              if sz < 1_000_000:
-                  print(f"    ⚠️  Failed ({sz} bytes, HTTP {resp.status_code})")
-                  if fpath.exists():
-                      fpath.unlink()
+                  print(f"{fpath.stat().st_size // 1024 // 1024} MB")
               else:
-                  print(f"    → {sz // 1024 // 1024} MB")
+                  print(f"HTTP {resp.status_code}")
 
-          print(f"✓ Downloaded {scene_id}")
-          files = list(scene_dir.glob("*"))
-          total = sum(f.stat().st_size for f in files)
-          print(f"  {len(files)} files, {total // 1024 // 1024} MB total")
+          # Verify
+          tifs = [f for f in scene_dir.glob("*_B*.TIF") if f.stat().st_size > 1_000_000]
+          total_mb = sum(f.stat().st_size for f in tifs) // 1024 // 1024
+          print(f"\n✓ {len(tifs)} bands downloaded ({total_mb} MB)")
+          assert len(tifs) >= 5, f"Need ≥5 bands, got {len(tifs)}"
           EOF
 
       - name: Run Python ACOLITE
