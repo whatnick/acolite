@@ -149,48 +149,29 @@ jobs:
                   continue
               print(f"  Downloading {fname}...")
 
-              # Use requests with a session that handles EarthData URS redirects
-              # The flow: USGS → redirects to URS login → back to USGS with auth cookie
-              import subprocess
+              # Get EarthData bearer token (works with USGS redirect flow)
               u = os.environ.get("EARTHDATA_u", "")
               p = os.environ.get("EARTHDATA_p", "")
 
-              # Method: curl with netrc handles redirect-based auth properly
-              result = subprocess.run(
-                  ["curl", "-s", "-L", "-n",
-                   "--netrc-file", os.path.expanduser("~/.netrc"),
-                   "-o", str(fpath),
-                   "-w", "%{http_code}",
-                   url],
-                  capture_output=True, text=True, timeout=300)
+              session = requests.Session()
+              # Get bearer token from EarthData
+              token_resp = session.post(
+                  "https://urs.earthdata.nasa.gov/api/users/token",
+                  auth=(u, p), timeout=30)
+              if token_resp.ok:
+                  token = token_resp.json().get("access_token", "")
+                  session.headers["Authorization"] = f"Bearer {token}"
 
-              http_code = result.stdout.strip()
+              # Download with token (handles redirects)
+              resp = session.get(url, allow_redirects=True, stream=True, timeout=300)
+              if resp.status_code == 200:
+                  with open(fpath, "wb") as f:
+                      for chunk in resp.iter_content(128 * 1024):
+                          f.write(chunk)
               sz = fpath.stat().st_size if fpath.exists() else 0
 
-              # If curl with netrc failed, try explicit user/pass
-              if sz < 1_000_000 or http_code != "200":
-                  result = subprocess.run(
-                      ["curl", "-s", "-L",
-                       "-u", f"{u}:{p}",
-                       "-o", str(fpath),
-                       "-w", "%{http_code}",
-                       url],
-                      capture_output=True, text=True, timeout=300)
-                  http_code = result.stdout.strip()
-                  sz = fpath.stat().st_size if fpath.exists() else 0
-
-              # If still failed, try wget
               if sz < 1_000_000:
-                  subprocess.run(
-                      ["wget", "-q", "--no-check-certificate",
-                       f"--user={u}", f"--password={p}",
-                       "-O", str(fpath), url],
-                      capture_output=True, timeout=300)
-                  sz = fpath.stat().st_size if fpath.exists() else 0
-
-              if sz < 1_000_000:
-                  print(f"    ⚠️  Download failed ({sz} bytes, HTTP {http_code})")
-                  # Remove the broken file
+                  print(f"    ⚠️  Failed ({sz} bytes, HTTP {resp.status_code})")
                   if fpath.exists():
                       fpath.unlink()
               else:
