@@ -43,10 +43,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: rust-binaries
-          path: |
-            target/release/examples/process_sentinel3
-            target/release/examples/process_sentinel2_ac
-            target/release/examples/process_landsat
+          path: target/release/examples/
 
   # ─── S3 OLCI Benchmark ──────────────────────────────────────────────────────
   s3-olci:
@@ -64,9 +61,9 @@ jobs:
           pip install "numpy<2" && pip install --no-build-isolation GDAL==$(gdal-config --version)
           pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
       - uses: actions/download-artifact@v5
-        with: { name: rust-binaries }
+        with: { name: rust-binaries, path: rust-binaries }
       - name: Fix permissions
-        run: chmod +x target/release/examples/*
+        run: chmod +x rust-binaries/process_*
       - name: Setup EarthData
         env:
           EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
@@ -131,7 +128,7 @@ jobs:
           # Rust
           import subprocess
           t0 = time.time()
-          r = subprocess.run(["./target/release/examples/process_sentinel3",
+          r = subprocess.run(["./rust-binaries/process_sentinel3",
               "--scene", str(sen3), "--limit", ",".join(map(str,limit)),
               "--output", str(cache/"rust")], capture_output=True, text=True, timeout=120,
               env={**os.environ, "RUST_LOG": "warn"})
@@ -163,9 +160,9 @@ jobs:
           pip install "numpy<2" && pip install --no-build-isolation GDAL==$(gdal-config --version)
           pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
       - uses: actions/download-artifact@v5
-        with: { name: rust-binaries }
+        with: { name: rust-binaries, path: rust-binaries }
       - name: Fix permissions
-        run: chmod +x target/release/examples/*
+        run: chmod +x rust-binaries/process_*
       - name: Download & Benchmark
         run: |
           python3 - <<'PYEOF'
@@ -206,7 +203,7 @@ jobs:
 
           # Rust
           t0 = time.time()
-          r = subprocess.run(["./target/release/examples/process_landsat",
+          r = subprocess.run(["./rust-binaries/process_landsat",
               "--file", str(scene_dir), "--limit", ",".join(map(str,limit)),
               "--output", str(cache/"rust"), "--aot-mode", "fixed"],
               capture_output=True, text=True, timeout=120, env={**os.environ, "RUST_LOG": "warn"})
@@ -238,9 +235,9 @@ jobs:
           pip install "numpy<2" && pip install --no-build-isolation GDAL==$(gdal-config --version)
           pip install scipy netCDF4 h5py requests pyproj pyresample scikit-image pyhdf
       - uses: actions/download-artifact@v5
-        with: { name: rust-binaries }
+        with: { name: rust-binaries, path: rust-binaries }
       - name: Fix permissions
-        run: chmod +x target/release/examples/*
+        run: chmod +x rust-binaries/process_*
       - name: Download & Benchmark
         env:
           CDSE_u: ${{ secrets.CDSE_USERNAME }}
@@ -294,7 +291,7 @@ jobs:
 
           # Rust (with same limit)
           t0 = time.time()
-          r = subprocess.run(["./target/release/examples/process_sentinel2_ac",
+          r = subprocess.run(["./rust-binaries/process_sentinel2_ac",
               "--file", str(safe_dir), "--limit", ",".join(map(str,limit)),
               "--res", "20", "--output", str(cache/"rust"), "--aot-mode", "fixed"],
               capture_output=True, text=True, timeout=300, env={**os.environ, "RUST_LOG": "warn"})
