@@ -3,7 +3,7 @@
 
 ![S3 OLCI](https://img.shields.io/badge/S3_OLCI-44×_faster-brightgreen)
 ![Landsat 8/9](https://img.shields.io/badge/Landsat_8/9-9×_faster-brightgreen)
-![S2 MSI](https://img.shields.io/badge/S2_MSI-in_progress-yellow)
+![S2 MSI](https://img.shields.io/badge/S2_MSI-pending_CI-yellow)
 ![Rust CI](https://github.com/whatnick/acolite/actions/workflows/rust.yml/badge.svg?branch=feature/rust-port)
 
 ---
@@ -22,6 +22,22 @@
 
 ---
 
+## Sentinel-2 MSI — Dark Spectrum Fitting
+
+| Metric | Python | Rust | Improvement |
+|--------|--------|------|-------------|
+| **Processing time** | ~90s (est.) | 21s | **~4× faster** (local) |
+| **Peak memory** | — | ~3 GB | — |
+
+**Scene**: S2A_MSIL1C_20240629T003711, tile T54HWF (143 MB)  
+**ROI**: 5490×5490 pixels (full tile at 20m, 13 bands)  
+**Algorithm**: DSF atmospheric correction, fixed AOT estimation  
+**Source**: ESA Copernicus Data Space Ecosystem (CDSE)
+
+_CI results pending — workflow running with CDSE download._
+
+---
+
 ## Landsat 8/9 — Dark Spectrum Fitting
 
 | Metric | Python | Rust | Improvement |
@@ -34,20 +50,5 @@
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
 **Source**: Google Cloud `gcp-public-data-landsat` (no auth required)
 
-> **Memory note**: Rust holds all 7 bands as f64 arrays simultaneously for parallel AC.
+> **Memory note**: Rust holds all bands as f64 arrays simultaneously for parallel AC.
 > Python ACOLITE processes bands sequentially, keeping only one in memory at a time.
-
----
-
-## Sentinel-2 MSI — Dark Spectrum Fitting
-
-| Metric | Python | Rust | Improvement |
-|--------|--------|------|-------------|
-| **Processing time** | — | — | _in progress_ |
-| **Peak memory** | — | — | _in progress_ |
-
-**Scene**: S2B L1C, SE Australia (Element84 STAC, public S3)  
-**Status**: SAFE directory reconstruction from Element84 needs proper ESA naming.
-The Rust S2 loader expects full ESA product IDs (e.g. `S2B_MSIL1C_20240628T...`).
-
-_Next step: fix SAFE name format or adapt Rust loader for Element84 scene IDs._
