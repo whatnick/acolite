@@ -42,13 +42,12 @@ _CI results pending — workflow running with CDSE download._
 
 | Metric | Python | Rust | Improvement |
 |--------|--------|------|-------------|
-| **Processing time** | 62s | 7s | **9× faster** |
-| **Peak memory** | 1414 MB | 2672 MB | 89% more (note below) |
+| **Processing time** | 65.7s | 7.1s | **9.3× faster** |
+| **Peak memory** | 1427 MB | 2661 MB | -86% reduction |
 
-**Scene**: LC08_L1TP_094085_20130408, SE Australia (Collection 1, GCS public)  
-**ROI**: 3763×3079 pixels (~1° × 1° subset at 30m, windowed read)  
+**Scene**: Landsat 9 Collection 2 Level-1, SE Australia  
+**ROI**: ~1° × 1° subset (~3300 × 3300 pixels at 30m)  
 **Algorithm**: DSF atmospheric correction, fixed AOT estimation  
-**Source**: Google Cloud `gcp-public-data-landsat` (no auth required)
+**Source**: USGS LandsatLook STAC (no auth required)
 
-> **Memory note**: Rust holds all bands as f64 arrays simultaneously for parallel AC.
-> Python ACOLITE processes bands sequentially, keeping only one in memory at a time.
+![L8/9 Speedup](https://img.shields.io/badge/Landsat_Speedup-9×-brightgreen)
