@@ -111,6 +111,37 @@ pub fn glint_correct(
     Ok(())
 }
 
+/// Apply glint correction with hyperspectral guard.
+///
+/// Matches the Python hDSF behaviour: if `is_hyperspectral` is true, the glint
+/// correction is skipped entirely (not yet implemented for hyperspectral sensors
+/// in the upstream Python code). Only the 'default' method is supported; other
+/// methods log a warning and return without modification.
+pub fn glint_correct_guarded(
+    rhos: &mut Array2<f32>,
+    wind: f32,
+    sza: f32,
+    vza: f32,
+    raa: f32,
+    wave_nm: u32,
+    is_hyperspectral: bool,
+    method: &str,
+) -> Result<()> {
+    if is_hyperspectral {
+        log::info!("hDSF glint correction not yet implemented for hyperspectral sensors");
+        return Ok(());
+    }
+    if method != "default" {
+        log::warn!(
+            "dsf_residual_glint_correction_method={} not implemented after RAdCor",
+            method
+        );
+        return Ok(());
+    }
+    log::info!("Running glint correction!");
+    glint_correct(rhos, wind, sza, vza, raa, wave_nm)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +191,41 @@ mod tests {
         assert!((n400 - 1.3434).abs() < 1e-4);
         let n550 = refri_interp(550.0);
         assert!(n550 > 1.33 && n550 < 1.35);
+    }
+
+    #[test]
+    fn test_glint_correct_guarded_skips_hyperspectral() {
+        let mut rhos = Array2::from_elem((10, 10), 0.05_f32);
+        let original = rhos[[5, 5]];
+        // Should skip entirely for hyperspectral sensors
+        glint_correct_guarded(&mut rhos, 10.0, 30.0, 30.0, 170.0, 550, true, "default").unwrap();
+        assert_eq!(
+            rhos[[5, 5]], original,
+            "rhos should be unchanged for hyperspectral sensors"
+        );
+    }
+
+    #[test]
+    fn test_glint_correct_guarded_skips_non_default_method() {
+        let mut rhos = Array2::from_elem((10, 10), 0.05_f32);
+        let original = rhos[[5, 5]];
+        // Should skip for non-default method
+        glint_correct_guarded(&mut rhos, 10.0, 30.0, 30.0, 170.0, 550, false, "alternative").unwrap();
+        assert_eq!(
+            rhos[[5, 5]], original,
+            "rhos should be unchanged for non-default method"
+        );
+    }
+
+    #[test]
+    fn test_glint_correct_guarded_applies_for_multispectral_default() {
+        let mut rhos = Array2::from_elem((10, 10), 0.05_f32);
+        let original = rhos[[5, 5]];
+        // Should apply correction for multispectral + default method
+        glint_correct_guarded(&mut rhos, 10.0, 30.0, 30.0, 170.0, 550, false, "default").unwrap();
+        assert!(
+            rhos[[5, 5]] < original,
+            "rhos should decrease after glint correction for multispectral + default"
+        );
     }
 }

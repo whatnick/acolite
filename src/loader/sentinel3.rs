@@ -736,6 +736,7 @@ fn read_nc_scaled_subset(
         .map_err(|e| AcoliteError::Processing(e.to_string()))
 }
 
+#[cfg(feature = "netcdf")]
 fn compute_subset(sen3_dir: &Path, tpg: &OlciTpg, limit: &[f64; 4]) -> Option<(usize, usize, usize, usize)> {
     let (south, west, north, east) = (limit[0], limit[1], limit[2], limit[3]);
 

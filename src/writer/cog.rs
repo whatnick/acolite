@@ -57,6 +57,11 @@ pub fn write_cog(output_path: &str, bands: &[BandData<f64>], _metadata: &Metadat
 }
 
 /// Write a single band as COG: MEM dataset → create_copy to COG driver.
+///
+/// Nodata handling: NaN values in the input are written as NaN in the output GeoTIFF,
+/// with the band's nodata value explicitly set. This matches the Python ACOLITE behaviour
+/// where `gdal.Warp` is used with `srcNodata`/`dstNodata=NaN` to ensure proper nodata
+/// propagation regardless of the source format's fill value encoding.
 #[cfg(feature = "gdal-support")]
 fn write_band_cog(path: &str, band: &BandData<f64>) -> Result<()> {
     let (height, width) = band.data.dim();
@@ -94,13 +99,19 @@ fn write_band_cog(path: &str, band: &BandData<f64>) -> Result<()> {
         }
     }
 
-    // Write pixel data (f64 → f32)
+    // Write pixel data (f64 → f32), preserving NaN as nodata
     let data: Vec<f32> = band.data.iter().map(|&v| v as f32).collect();
     let mut buf = Buffer::new((width, height), data);
-    mem_ds
+    let mut rb = mem_ds
         .rasterband(1)
-        .map_err(|e| AcoliteError::Processing(format!("rasterband: {}", e)))?
-        .write((0, 0), (width, height), &mut buf)
+        .map_err(|e| AcoliteError::Processing(format!("rasterband: {}", e)))?;
+
+    // Set NaN as the nodata value on the source band so that GDAL propagates it
+    // correctly through any warping/translation operations (mirrors Python's
+    // srcNodata=src_nodata, dstNodata=np.nan approach)
+    let _ = rb.set_no_data_value(Some(f64::NAN));
+
+    rb.write((0, 0), (width, height), &mut buf)
         .map_err(|e| AcoliteError::Processing(format!("write pixels: {}", e)))?;
 
     // CreateCopy to COG driver

@@ -46,7 +46,7 @@ pub use ac::ancillary::{
 };
 
 // Glint correction
-pub use ac::glint::{compute_rsky, glint_correct};
+pub use ac::glint::{compute_rsky, glint_correct, glint_correct_guarded};
 
 // LUT-based atmospheric correction
 pub use ac::{compute_gas_transmittance, GasTransmittance};

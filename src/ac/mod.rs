@@ -15,7 +15,7 @@ pub use ancillary::Ancillary;
 pub use calibration::{dn_to_radiance, dn_to_reflectance, earth_sun_distance};
 pub use dsf::{estimate_dark_spectrum, AotCompute, DarkSpectrumMethod, DsfConfig, DsfMode};
 pub use gas::{gas_correction, ozone_transmittance, water_vapor_transmittance};
-pub use glint::{compute_rsky, glint_correct};
+pub use glint::{compute_rsky, glint_correct, glint_correct_guarded};
 pub use interp::RegularGridInterpolator;
 pub use lut::{interp_lut_1d, interp_lut_2d, LutManager};
 pub use rayleigh::{rayleigh_correction, rayleigh_optical_thickness};

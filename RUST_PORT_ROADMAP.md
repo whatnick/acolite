@@ -1,34 +1,39 @@
-# ACOLITE-RS Roadmap — Updated 2026-07-30
+# ACOLITE-RS Roadmap — Updated 2026-08-11
 
 ## Executive Summary
 
-### Current State (as of 2026-07-30)
+### Current State (as of 2026-08-11)
 - **Rust LOC**: 13,014 across 64 `.rs` files
-- **Python LOC** (target): 55,342 across 528 `.py` files
+- **Python LOC** (target): 55,424 across 528 `.py` files
 - **Ported**: 4 sensor loaders (Landsat 8/9, Sentinel-2, Sentinel-3 OLCI, PACE OCI) + full LUT-DSF atmospheric correction pipeline
 - **Coverage**: ~9,758 Python LOC equivalently ported (~18% of codebase by functionality)
 - **Tests**: 135 Rust + 195 Python regression = **330 total tests**
 - **Elapsed time**: ~12 active days (2026-03-05 to 2026-03-17), agent-assisted with Kiro + Copilot dual-agent harness
+- **Last upstream sync**: 2026-08-11 (commit `64a02ff3`)
 
-### New Python Work Since Port Started (2026-03-05 → 2026-07-29)
+### New Python Work Since Last Port Update (2026-07-30 → 2026-08-11)
 
-95 commits upstream adding **22,734 net new lines** including:
+13 commits upstream adding **82 net new lines** including:
 
-| New Module | LOC | Category | Port Priority |
-|-----------|-----|----------|---------------|
-| `hdsf/hdsf.py` | 336 | Hyperspectral DSF variant | High (core AC) |
-| `rtm/hydrolight/` | 683 | Radiative transfer modelling | Medium (L2W) |
-| `tact/profiles/era5_ecmwf.py` | 190 | ERA5 atmospheric profiles | Medium (TACT) |
-| `convert/c2rcc.py` + `polymer.py` | 266 | External AC format import | Low |
-| `parameters/chl_crat/` | 160 | Chl-a colour ratio algorithm | Medium (L2W) |
-| `parameters/malh/` | 37 | MALH algorithm | Medium (L2W) |
-| `shared/wopp/` | 65 | Water optical property params | Medium (L2W) |
-| `shared/array/` | ~120 | Array utilities (convolve, normalise) | Low (utility) |
-| `shared/xr/read_rho.py` | 52 | xarray reader | Low |
-| `map/rgb/` | 44 | RGB mapping | Low (visualization) |
-| `pace/convert_gains.py` | 32 | PACE gain conversion | Low |
+| Change | Files | Category | Port Impact |
+|--------|-------|----------|-------------|
+| hDSF glint correction guard for hyperspectral | `hdsf/hdsf.py` | AC core | ✅ Ported (glint_correct_guarded) |
+| nc_to_geotiff nodata handling (gdal.Warp) | `output/nc_to_geotiff.py` | Writer | ✅ Ported (COG nodata fix) |
+| WorldView XML namespace-agnostic parsing | `worldview/metadata_parse.py` | Sensor loader | Phase D (WorldView) |
+| WorldView PGC bundle handling improvements | `worldview/l1_convert.py` | Sensor loader | Phase D (WorldView) |
+| WorldView PAN band identifiers (WV03/WV04) | `worldview/metadata_parse.py` | Sensor loader | Phase D (WorldView) |
+| WorldView non-zero nodata for PGC imagery | `worldview/l1_convert.py` | Sensor loader | Phase D (WorldView) |
+| WorldView multi-band file bundle support | `worldview/l1_convert.py` | Sensor loader | Phase D (WorldView) |
+| WorldView half-pixel projection alignment | `worldview/l1_convert.py` | Sensor loader | Phase D (WorldView) |
+| WorldView global_dims from projection data | `worldview/l1_convert.py` | Sensor loader | Phase D (WorldView) |
+| Pléiades skip missing tile | `pleiades/l1_convert.py` | Sensor loader | Phase D (Pléiades) |
+| Pléiades moved up components initialisation | `pleiades/bundle_test.py` | Sensor loader | Phase D (Pléiades) |
+| Hyperspectral sensor check in hDSF | `hdsf/hdsf.py` | AC core | ✅ Ported |
 
-**Impact on port scope**: +1,985 LOC of algorithmically significant code (hDSF, Hydrolight, ERA5, chl_crat) that will need Rust equivalents.
+**Impact on Rust port**:
+- ✅ 2 changes ported in this sync (glint guard + COG nodata)
+- 10 changes affect WorldView/Pléiades loaders (not yet ported — tracked for Phase D)
+- **Phase D note**: WorldView loader must implement XML namespace-agnostic parsing (use `getElementsByTagNameNS('*', tag)` equivalent in Rust XML parser), PGC stretch detection beyond just 'mr', and support for single multi-band TIFF files as bundles
 
 ---
 

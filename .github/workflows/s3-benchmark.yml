@@ -1,0 +1,239 @@
+name: S3 OLCI Rust vs Python Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/rust-port]
+    paths:
+      - "src/**"
+      - "examples/process_sentinel3.rs"
+      - "acolite/sentinel3/**"
+      - "acolite/ac/**"
+      - "tests/regression/test_s3_e2e_pipeline.py"
+      - ".github/workflows/s3-benchmark.yml"
+
+env:
+  ACOLITE_TEST_CACHE: /tmp/acolite_s3_cache
+  CARGO_TERM_COLOR: always
+  RUST_LOG: info
+
+jobs:
+  benchmark:
+    name: S3 OLCI — Rust vs Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev gdal-bin libnetcdf-dev libhdf5-dev pkg-config
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-s3bench-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-s3bench-
+
+      - name: Cache S3 scene
+        uses: actions/cache@v4
+        with:
+          path: /tmp/acolite_s3_cache
+          key: s3-olci-scene-benchmark-v1
+          restore-keys: s3-olci-scene-
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install numpy scipy matplotlib \
+            GDAL==$(gdal-config --version) \
+            netCDF4 h5py requests pyproj pyresample scikit-image pyhdf \
+            pytest pytest-timeout
+
+      - name: Build Rust (release, full-io)
+        run: cargo build --release --features full-io --example process_sentinel3
+
+      - name: Download S3 OLCI scene
+        env:
+          EARTHDATA_u: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_p: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: |
+          python3 - <<'EOF'
+          import os, sys, requests, zipfile, netrc
+          from pathlib import Path
+          from datetime import datetime, timedelta
+
+          cache = Path(os.environ["ACOLITE_TEST_CACHE"])
+          cache.mkdir(parents=True, exist_ok=True)
+
+          # Check for cached scene
+          existing = list(cache.glob("*.SEN3"))
+          if existing and any(existing[0].glob("*.nc")):
+              print(f"✓ Cached: {existing[0].name}")
+              sys.exit(0)
+
+          # Search CMR for recent S3A OLCI over SE Australia
+          end = datetime.utcnow()
+          start = end - timedelta(days=14)
+          params = {
+              "short_name": "S3A_OL_1_EFR",
+              "provider": "LAADS",
+              "bounding_box": "141,-36.5,145,-33.5",
+              "temporal": f"{start:%Y-%m-%dT00:00:00Z},{end:%Y-%m-%dT23:59:59Z}",
+              "page_size": "3",
+              "sort_key[]": "-start_date",
+          }
+          resp = requests.get("https://cmr.earthdata.nasa.gov/search/granules.json",
+                              params=params, timeout=30)
+          resp.raise_for_status()
+          entries = resp.json()["feed"]["entry"]
+          assert entries, "No S3A OLCI scenes found"
+
+          granule = None
+          for entry in entries:
+              links = [l["href"] for l in entry.get("links", [])
+                       if l["href"].startswith("https://") and l["href"].endswith(".zip")]
+              if links:
+                  granule = {"id": entry.get("producer_granule_id", ""), "url": links[0]}
+                  break
+          assert granule, "No downloadable granule"
+          print(f"Downloading: {granule['id']}")
+
+          # Auth
+          u = os.environ.get("EARTHDATA_u", "")
+          p = os.environ.get("EARTHDATA_p", "")
+          if not u:
+              try:
+                  nrc = netrc.netrc()
+                  auth = nrc.authenticators("urs.earthdata.nasa.gov")
+                  u, p = auth[0], auth[2]
+              except: pass
+          assert u, "No EarthData credentials"
+
+          session = requests.Session()
+          session.auth = (u, p)
+          resp = session.get(granule["url"], allow_redirects=True, stream=True, timeout=60)
+          resp.raise_for_status()
+          zip_path = cache / granule["id"]
+          with open(zip_path, "wb") as f:
+              for chunk in resp.iter_content(128*1024):
+                  f.write(chunk)
+          with zipfile.ZipFile(zip_path) as zf:
+              zf.extractall(cache)
+          zip_path.unlink()
+          print(f"✓ Downloaded and extracted")
+          EOF
+
+      - name: Run Python ACOLITE
+        id: python
+        run: |
+          python3 - <<'EOF'
+          import sys, time, resource, json
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          import acolite as ac
+
+          cache = Path("/tmp/acolite_s3_cache")
+          sen3 = next(cache.glob("*.SEN3"))
+          out = cache / "py_output"
+          out.mkdir(exist_ok=True)
+
+          settings = {
+              "inputfile": str(sen3),
+              "output": str(out),
+              "limit": [-36.0, 141.0, -34.5, 143.0],
+              "verbosity": 1,
+              "dsf_aot_estimate": "fixed",
+              "l2w_parameters": None,
+              "rgb_rhot": False, "rgb_rhos": False, "map_l2w": False,
+          }
+
+          t0 = time.time()
+          result = ac.acolite.acolite_run(settings=settings)
+          elapsed = time.time() - t0
+          peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+          metrics = {"time_s": round(elapsed, 2), "peak_rss_mb": round(peak_mb)}
+          print(json.dumps(metrics))
+          Path("/tmp/python_metrics.json").write_text(json.dumps(metrics))
+          EOF
+
+      - name: Run Rust ACOLITE
+        id: rust
+        run: |
+          SCENE=$(ls -d /tmp/acolite_s3_cache/*.SEN3 | head -1)
+          mkdir -p /tmp/acolite_s3_cache/rust_output
+
+          START=$(date +%s%N)
+          ./target/release/examples/process_sentinel3 \
+            --scene "$SCENE" \
+            --limit "-36.0,141.0,-34.5,143.0" \
+            --output /tmp/acolite_s3_cache/rust_output 2>&1 | tee /tmp/rust_output.log
+          END=$(date +%s%N)
+
+          ELAPSED_MS=$(( (END - START) / 1000000 ))
+          echo "{\"time_s\": $(echo "scale=2; $ELAPSED_MS / 1000" | bc), \"peak_rss_mb\": $(grep VmPeak /proc/$$/status 2>/dev/null | awk '{print int($2/1024)}' || echo 0)}" > /tmp/rust_metrics.json
+          cat /tmp/rust_metrics.json
+
+      - name: Compare Results
+        id: compare
+        run: |
+          python3 - <<'EOF'
+          import json
+          from pathlib import Path
+
+          py = json.loads(Path("/tmp/python_metrics.json").read_text())
+          rust = json.loads(Path("/tmp/rust_metrics.json").read_text())
+
+          speedup = py["time_s"] / rust["time_s"] if rust["time_s"] > 0 else 0
+          mem_ratio = py["peak_rss_mb"] / rust["peak_rss_mb"] if rust["peak_rss_mb"] > 0 else 0
+
+          print(f"\n{'='*60}")
+          print(f"  S3 OLCI BENCHMARK: Rust vs Python")
+          print(f"{'='*60}")
+          print(f"  {'Metric':<20} {'Python':>10} {'Rust':>10} {'Factor':>10}")
+          print(f"  {'-'*20} {'-'*10} {'-'*10} {'-'*10}")
+          print(f"  {'Wall time (s)':<20} {py['time_s']:>10.1f} {rust['time_s']:>10.1f} {speedup:>9.1f}×")
+          print(f"  {'Peak RSS (MB)':<20} {py['peak_rss_mb']:>10.0f} {rust['peak_rss_mb']:>10.0f} {mem_ratio:>9.1f}×")
+          print(f"{'='*60}")
+
+          # Write summary for GH
+          summary = f"""## S3 OLCI Benchmark Results
+
+          | Metric | Python | Rust | Speedup |
+          |--------|--------|------|---------|
+          | Wall time | {py['time_s']:.1f}s | {rust['time_s']:.1f}s | **{speedup:.1f}×** |
+          | Peak RSS | {py['peak_rss_mb']:.0f} MB | {rust['peak_rss_mb']:.0f} MB | {mem_ratio:.1f}× |
+          """
+          Path(os.environ.get("GITHUB_STEP_SUMMARY", "/tmp/summary.md")).write_text(summary)
+
+          # Assert Rust is faster
+          assert speedup > 2.0, f"Rust should be >2× faster (got {speedup:.1f}×)"
+          import os
+          EOF
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-benchmark-results
+          path: |
+            /tmp/python_metrics.json
+            /tmp/rust_metrics.json
+            /tmp/rust_output.log
